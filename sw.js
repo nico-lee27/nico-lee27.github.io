@@ -1,8 +1,8 @@
-const CACHE = 'health-tracker-v14';
+const CACHE = 'health-tracker-v15';
 const ASSETS = [
   './',
   './index.html',
-  './manifest.json',
+  './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png'
 ];
@@ -26,21 +26,16 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
 
-  // 页面导航：缓存优先（秒开）+ 后台静默更新（下次打开即最新版）
+  // 页面导航：网络优先（保证每次打开都是最新版），断网时回退缓存
   if (e.request.mode === 'navigate') {
     e.respondWith(
-      caches.match('./index.html').then(cached => {
-        // 后台尝试拉新，成功则更新缓存；失败不影响本次打开
-        const network = fetch(e.request).then(res => {
-          if (res && res.status === 200) {
-            const copy = res.clone();
-            caches.open(CACHE).then(c => c.put('./index.html', copy));
-          }
-          return res;
-        }).catch(() => null);
-        // 有缓存立即返回（不等网络）；无缓存才等网络结果
-        return cached || network.then(res => res || Response.error());
-      })
+      fetch(e.request).then(res => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put('./index.html', copy));
+        }
+        return res;
+      }).catch(() => caches.match('./index.html'))
     );
     return;
   }
