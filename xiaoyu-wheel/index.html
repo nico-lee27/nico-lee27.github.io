@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="小鱼大转盘">
+<meta name="theme-color" content="#FFB067">
+<meta name="format-detection" content="telephone=no">
+<title>小鱼大转盘 之 布可星球</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(120% 70% at 50% 0%, #FFFDF8 0%, #FFEFD9 45%, #FFDCC0 100%);
+    color: #4A3728; overflow: hidden; touch-action: manipulation;
+    user-select: none; -webkit-user-select: none;
+  }
+  .app { height: 100vh; height: 100dvh; display: flex; flex-direction: column;
+         padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+
+  header { flex: none; text-align: center; padding: 10px 14px 6px; position: relative; }
+  header h1 { font-size: 17px; font-weight: 800; letter-spacing: .5px;
+    background: linear-gradient(90deg,#E8701A,#F5A623,#4AA8E0,#E8701A);
+    -webkit-background-clip: text; background-clip: text; color: transparent; }
+  header .sub { font-size: 11px; color: #B08A63; margin-top: 2px; }
+  .icon-btn { position: absolute; right: 12px; top: 12px; width: 34px; height: 34px; border: none;
+    border-radius: 50%; background: rgba(255,255,255,.8); font-size: 16px; box-shadow: 0 2px 6px rgba(160,110,60,.16); }
+
+  .pages { flex: 1 1 auto; min-height: 0; position: relative; }
+  .page { position: absolute; inset: 0; display: none; flex-direction: column; padding: 0 14px; }
+  .page.active { display: flex; }
+  #p-wheel { padding-left: 4px; padding-right: 4px; }   /* 转盘页少留边，盘面尽量大 */
+  .scroll { overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: 16px; }
+
+  /* ---------- A 转盘区 ---------- */
+  .crumb { flex: none; text-align: center; padding: 4px 0 2px; }
+  .crumb span { display: inline-block; background: rgba(255,255,255,.85); border-radius: 20px;
+    padding: 6px 16px; font-size: 13px; font-weight: 700; color: #8A5A2B;
+    box-shadow: 0 2px 8px rgba(160,110,60,.14); }
+  .crumb .tag { font-size: 11px; color: #B08A63; font-weight: 600; margin-left: 4px; }
+  .wheel-area { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-height: 0; }
+  .wheel-wrap { position: relative; }
+  canvas { display: block; filter: drop-shadow(0 10px 22px rgba(150,95,40,.26)); }
+  #ctrl { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); border: none; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #FFF6DC, #FFC94D 45%, #F2A01E 100%);
+    color: #8A3B00; font-weight: 800; letter-spacing: 1px;
+    box-shadow: 0 4px 0 #C87A0C, 0 8px 18px rgba(150,90,20,.45), inset 0 2px 6px rgba(255,255,255,.7);
+    transition: transform .12s ease, box-shadow .12s ease; }
+  #ctrl:active { transform: translate(-50%,-50%) scale(.94); }
+  #ctrl.running { background: radial-gradient(circle at 35% 30%, #FFE0E0, #FF8A65 45%, #E85D3C 100%);
+    color: #fff; box-shadow: 0 4px 0 #B4401F, 0 8px 18px rgba(180,60,30,.45), inset 0 2px 6px rgba(255,255,255,.5); }
+  #ctrl:disabled { opacity: .8; }
+  .wheel-foot { flex: none; text-align: center; padding: 6px 0 8px; }
+  .hint { font-size: 12px; color: #A98A6B; margin-top: 8px; }
+  .ghost-btn { border: none; background: rgba(255,255,255,.9); color: #8A6A50; font-size: 13px; font-weight: 700;
+    padding: 8px 16px; border-radius: 20px; box-shadow: 0 2px 8px rgba(160,110,60,.14); }
+
+  /* ---------- B 角色卡片 ---------- */
+  .sec-title { font-size: 14px; font-weight: 800; color: #7A5230; margin: 12px 0 8px; display: flex; align-items: center; gap: 6px; }
+  .sec-title .pill { font-size: 11px; font-weight: 700; background: #FFE3C2; color: #B1620F; border-radius: 12px; padding: 2px 8px; margin-left: auto; }
+  .role-box { background: rgba(255,255,255,.8); border-radius: 16px; padding: 12px; margin-bottom: 12px;
+    box-shadow: 0 3px 12px rgba(160,110,60,.12); }
+  .role-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 800; margin-bottom: 10px; }
+  .role-head .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .role-head .cnt { margin-left: auto; font-size: 12px; font-weight: 700; color: #A98A6B; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .cell { background: #FFF8EE; border: 2px dashed #E7D3BC; border-radius: 14px; padding: 8px 4px; text-align: center; }
+  .cell .em { font-size: 28px; line-height: 1.1; filter: grayscale(1); opacity: .45; }
+  .cell .nm { font-size: 11px; color: #B39A82; margin-top: 2px; }
+  .cell .pg { font-size: 11px; font-weight: 800; color: #C58B4A; margin-top: 4px; }
+  .cell.ready { border-color: #FFB84D; background: #FFF3DC; }
+  .cell.ready .em { filter: none; opacity: 1; }
+  .cell.ready .pg { color: #E8701A; }
+  .cell.owned { border: 2px solid #FFC94D; background: linear-gradient(180deg,#FFF9E6,#FFEFC6); }
+  .cell.owned .em { filter: none; opacity: 1; }
+  .cell.owned .nm { color: #8A5A2B; }
+  .cell.owned .pg { color: #2E9E5B; }
+  .btn-merge { margin-top: 4px; width: 100%; border: none; border-radius: 10px; padding: 4px 0;
+    font-size: 11px; font-weight: 800; background: linear-gradient(180deg,#FFC44D,#F2911E); color: #fff; }
+  .btn-merge:active { transform: translateY(1px); }
+
+  /* ---------- C 个人中心 ---------- */
+  .me-card { background: rgba(255,255,255,.85); border-radius: 16px; padding: 14px; margin-bottom: 12px;
+    box-shadow: 0 3px 12px rgba(160,110,60,.12); }
+  .money-row { display: flex; align-items: baseline; gap: 6px; }
+  .money-row .big { font-size: 30px; font-weight: 800; color: #E8701A; }
+  .money-row .unit { font-size: 14px; color: #A98A6B; }
+  .money-row .note { margin-left: auto; font-size: 11px; color: #B39A82; }
+  .chips { display: flex; gap: 8px; margin-top: 10px; }
+  .chip { flex: 1; background: #FFF8EE; border-radius: 12px; padding: 8px 4px; text-align: center; }
+  .chip .em { font-size: 20px; }
+  .chip .v { font-size: 15px; font-weight: 800; color: #7A5230; margin-top: 2px; }
+  .chip .n { font-size: 10px; color: #B39A82; }
+  .ex-title { font-size: 13px; font-weight: 800; color: #7A5230; margin: 12px 0 8px; }
+  .ex-row { display: flex; align-items: center; gap: 8px; background: #FFF8EE; border-radius: 12px; padding: 8px 10px; margin-bottom: 8px; }
+  .ex-row .txt { font-size: 12px; color: #7A5230; flex: 1; }
+  .ex-row .txt b { color: #E8701A; }
+  .ex-btn { border: none; border-radius: 10px; padding: 6px 12px; font-size: 12px; font-weight: 800;
+    background: linear-gradient(180deg,#FFC44D,#F2911E); color: #fff; }
+  .ex-btn:disabled { background: #EADBC6; color: #B39A82; }
+  .pun-list { display: flex; flex-direction: column; gap: 6px; }
+  .pun-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #6B5340; padding: 4px 0; }
+  .pun-item .c { margin-left: auto; font-weight: 800; color: #C1580C; }
+  .log-list { font-size: 12px; color: #8A6A50; }
+  .log-list li { display: flex; gap: 8px; padding: 4px 0; border-top: 1px dashed rgba(160,120,80,.16); list-style: none; }
+  .log-list li:first-child { border-top: none; }
+  .log-list .t { margin-left: auto; color: #B39A82; font-size: 11px; }
+  .danger { width: 100%; border: none; background: #F7E3DA; color: #C1580C; border-radius: 12px;
+    padding: 10px; font-size: 13px; font-weight: 700; margin-top: 6px; }
+
+  /* ---------- 底部导航 ---------- */
+  .tabs { flex: none; display: flex; gap: 6px; padding: 8px 12px 10px; background: rgba(255,255,255,.6);
+    border-top: 1px solid rgba(200,160,110,.2); }
+  .tab { flex: 1; border: none; background: transparent; padding: 6px 0; border-radius: 14px;
+    font-size: 11px; font-weight: 700; color: #A98A6B; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .tab .ic { font-size: 20px; }
+  .tab.on { background: #fff; color: #E8701A; box-shadow: 0 2px 10px rgba(160,110,60,.18); }
+
+  /* ---------- 弹窗 ---------- */
+  .modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(60,35,15,.45); z-index: 30; padding: 24px; }
+  .modal.show { display: flex; animation: fade .18s ease; }
+  @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+  .mcard { width: 100%; max-width: 320px; background: #fff; border-radius: 22px; padding: 24px 18px 18px; text-align: center;
+    box-shadow: 0 18px 40px rgba(80,40,10,.35); animation: pop .32s cubic-bezier(.2,1.4,.5,1); }
+  @keyframes pop { from { transform: scale(.6); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+  .mcard .emoji { font-size: 52px; line-height: 1; }
+  .mcard h2 { margin: 10px 0 6px; font-size: 22px; color: #E8701A; }
+  .mcard p { font-size: 13px; color: #8A6A50; }
+  .mcard .btns { display: flex; gap: 10px; margin-top: 16px; }
+  .mcard .btns button { flex: 1; border: none; border-radius: 14px; padding: 11px 0; font-size: 14px; font-weight: 700; }
+  .btn-p { background: linear-gradient(180deg,#FFC44D,#F2911E); color: #fff; box-shadow: 0 3px 0 #C87A0C; }
+  .btn-s { background: #F3E7DA; color: #8A6A50; }
+  .mcard .btns button:active { transform: translateY(2px); box-shadow: none; }
+  .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 40; pointer-events: none; border-radius: 2px; }
+  @keyframes fall { to { transform: translateY(105vh) rotate(720deg); opacity: .9 } }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <h1>小鱼大转盘 · 布可星球</h1>
+    <div class="sub">转一转，收集角色卡、赢奖励</div>
+    <button id="sound" class="icon-btn" aria-label="音效">🔊</button>
+  </header>
+
+  <div class="pages">
+    <!-- A 转盘区 -->
+    <section class="page active" id="p-wheel">
+      <div class="crumb"><span id="crumb">主转盘</span></div>
+      <div class="wheel-area">
+        <div class="wheel-wrap">
+          <canvas id="wheel"></canvas>
+          <button id="ctrl">开始</button>
+        </div>
+      </div>
+      <div class="wheel-foot">
+        <button id="backMain" class="ghost-btn" style="display:none">← 返回主转盘</button>
+        <div class="hint" id="hint">点中间按钮开始，再点一次停下</div>
+      </div>
+    </section>
+
+    <!-- B 角色卡片 -->
+    <section class="page" id="p-cards">
+      <div class="scroll" id="cardsBox"></div>
+    </section>
+
+    <!-- C 个人中心 -->
+    <section class="page" id="p-me">
+      <div class="scroll" id="meBox"></div>
+    </section>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab on" data-page="p-wheel"><span class="ic">🎡</span>转盘</button>
+    <button class="tab" data-page="p-cards"><span class="ic">🃏</span>角色卡片</button>
+    <button class="tab" data-page="p-me"><span class="ic">👦</span>个人中心</button>
+  </nav>
+</div>
+
+<div class="modal" id="modal">
+  <div class="mcard">
+    <div class="emoji" id="mEmoji">🎉</div>
+    <h2 id="mTitle"></h2>
+    <p id="mTip"></p>
+    <div class="btns">
+      <button id="mBtn1" class="btn-s">返回</button>
+      <button id="mBtn2" class="btn-p">好耶</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* =========================================================
+     数据模型
+     S.frag[role][i]  : 表情碎片数量（第 i 个表情）
+     S.card[role][i]  : 是否已合成完整角色卡
+     S.money/bird/chick/duck/box : 奖励
+     S.punish[key]    : 惩罚累计次数
+     ========================================================= */
+  var STORE_KEY = 'xiaoyu_wheel_v1';
+
+  var EMO = [
+    { name: '开心', emoji: '😄' },
+    { name: '爱心', emoji: '😍' },
+    { name: '酷炫', emoji: '😎' },
+    { name: '惊讶', emoji: '😲' },
+    { name: '犯困', emoji: '🥱' },
+    { name: '生气', emoji: '😠' }
+  ];
+
+  var ROLES = [
+    { id: 'bubu',   name: '布布', emoji: '🦊', iconFox: 'bubu', color: '#FF9A6C', text: '布布角色' },
+    { id: 'keke',   name: '可可', emoji: '🦊', iconFox: 'keke', color: '#FF8FB1', text: '可可角色' },
+    { id: 'xiaoyu', name: '小鱼', emoji: '🐟', iconFox: null,   color: '#5CC8F5', text: '小鱼角色' }
+  ];
+
+  var PUNISH = [
+    { key: 'squat', text: '深蹲5次',      emoji: '🏋️', color: '#B08BE8', label: ['深蹲', '5次'] },
+    { key: 'frog',  text: '蛙跳5次',      emoji: '🐸', color: '#8FBF6F', label: ['蛙跳', '5次'] },
+    { key: 'hw',    text: '写作业30分钟', emoji: '✏️', color: '#7FA6E8', label: ['写作业', '30分钟'] }
+  ];
+
+  // weight = 该奖项在奖励转盘上占的扇区数量（小鸟:小鸡:小鸭 = 4:2:1，其余各 1）
+  var REWARD = [
+    { key: 'm1',    text: '1元',       emoji: '🪙', color: '#FFD54F', weight: 1 },
+    { key: 'm2',    text: '2元',       emoji: '💰', color: '#FFB84D', weight: 1 },
+    { key: 'bird',  text: '小鸟卡片',  emoji: '🐦', color: '#AED581', weight: 4 },
+    { key: 'chick', text: '小鸡卡片',  emoji: '🐤', color: '#FFD18C', weight: 2 },
+    { key: 'duck',  text: '小鸭卡片',  emoji: '🦆', color: '#7FD3E8', weight: 1 },
+    { key: 'none',  text: '谢谢惠顾',  emoji: '🙈', color: '#E8CE9A', weight: 1 }
+  ];
+
+  function shade(hex, f) {
+    var r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
+    r = Math.max(0, Math.min(255, Math.round(r * f)));
+    g = Math.max(0, Math.min(255, Math.round(g * f)));
+    b = Math.max(0, Math.min(255, Math.round(b * f)));
+    return '#' + [r, g, b].map(function (v) { return ('0' + v.toString(16)).slice(-2); }).join('');
+  }
+
+  // 按权重展开为扇区，并尽量把同类扇区打散，避免连成一大片
+  function buildWeighted(list) {
+    var keys = [], w = {}, map = {};
+    list.forEach(function (it) { keys.push(it.key); w[it.key] = it.weight || 1; map[it.key] = it; });
+    var total = 0, left = {};
+    keys.forEach(function (k) { total += w[k]; left[k] = w[k]; });
+    var order = [], last = null;
+    while (total > 0) {
+      var best = null, bestV = -Infinity;
+      keys.forEach(function (k) {
+        if (!left[k]) return;
+        var v = left[k] + (k === last ? -1 : 1);
+        if (v > bestV) { bestV = v; best = k; }
+      });
+      order.push(best); left[best]--; total--; last = best;
+    }
+    var used = {};
+    return order.map(function (k) {
+      var i = used[k] || 0; used[k] = i + 1;
+      var it = map[k];
+      return { key: it.key, text: it.text, emoji: it.emoji, idx: it.idx, weight: w[k],
+               color: (i % 2 === 1) ? shade(it.color, 1.12) : it.color };
+    });
+  }
+
+  /* 兑换关系（逐级合成，不是每级都能直接换盲盒）：
+       8 张小鸟卡片 → 1 张小鸭卡片
+       2 张小鸡卡片 → 1 张小鸭卡片
+      10 张小鸭卡片 → 1 个小鸡盲盒                                   */
+  var EXCHANGE = [
+    { key: 'bird',  to: 'duck', need: 8,  name: '小鸟卡片', emoji: '🐦', toName: '小鸭卡片', toEmoji: '🦆', verb: '合成' },
+    { key: 'chick', to: 'duck', need: 2,  name: '小鸡卡片', emoji: '🐤', toName: '小鸭卡片', toEmoji: '🦆', verb: '合成' },
+    { key: 'duck',  to: 'box',  need: 10, name: '小鸭卡片', emoji: '🦆', toName: '小鸡盲盒', toEmoji: '🎁', verb: '兑换' }
+  ];
+  function cardName(k) {
+    if (k === 'bird') return '小鸟卡片';
+    if (k === 'chick') return '小鸡卡片';
+    if (k === 'duck') return '小鸭卡片';
+    return '小鸡盲盒';
+  }
+
+  function defaultState() {
+    var s = { frag: {}, card: {}, money: 0, bird: 0, chick: 0, duck: 0, box: 0,
+              punish: { squat: 0, frog: 0, hw: 0 }, log: [], spins: 0 };
+    ROLES.forEach(function (r) {
+      s.frag[r.id] = [0, 0, 0, 0, 0, 0];
+      s.card[r.id] = [false, false, false, false, false, false];
+    });
+    return s;
+  }
+
+  var S = load();
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return defaultState();
+      var s = JSON.parse(raw), d = defaultState();
+      // 补齐字段，兼容旧数据
+      ROLES.forEach(function (r) {
+        if (!s.frag || !s.frag[r.id]) s.frag = s.frag || {}, s.frag[r.id] = d.frag[r.id];
+        if (!s.card || !s.card[r.id]) s.card = s.card || {}, s.card[r.id] = d.card[r.id];
+      });
+      ['money','bird','chick','duck','box','spins'].forEach(function (k) { if (typeof s[k] !== 'number') s[k] = 0; });
+      if (!s.punish) s.punish = d.punish;
+      if (!s.log) s.log = [];
+      return s;
+    } catch (e) { return defaultState(); }
+  }
+  function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) {} }
+
+  /* ---------- 转盘配置 ---------- */
+  var WHEELS = {};
+  WHEELS.main = {
+    title: '主转盘', isMain: true,
+    items: [
+      { key: 'bubu',   text: '布布角色', emoji: '🦊', iconFox: 'bubu', color: '#FF9A6C', next: 'bubu' },
+      { key: 'keke',   text: '可可角色', emoji: '🦊', iconFox: 'keke', color: '#FF8FB1', next: 'keke' },
+      { key: 'xiaoyu', text: '小鱼角色', emoji: '🐟', color: '#5CC8F5', next: 'xiaoyu' },
+      { key: 'reward', text: '奖励',     emoji: '🎁', color: '#7BD389', next: 'reward' },
+      { key: 'punish', text: '惩罚',     emoji: '⚡', color: '#B08BE8', next: 'punish' },
+      { key: 'none',   text: '谢谢惠顾', emoji: '🙈', color: '#E8CE9A', next: null }
+    ]
+  };
+  ROLES.forEach(function (r) {
+    WHEELS[r.id] = {
+      title: r.name + '表情', role: r.id, isRole: true,
+      items: EMO.map(function (e, i) {
+        return { key: 'e' + i, text: e.name, emoji: e.emoji, idx: i,
+                 color: ['#FFD79A','#FFC1A6','#FFB1C1','#C7B4F0','#A8DCF0','#B7E5A8'][i] };
+      })
+    };
+  });
+  WHEELS.reward = { title: '奖励转盘', isReward: true, items: buildWeighted(REWARD) };
+  WHEELS.punish = { title: '惩罚转盘', isPunish: true, items: PUNISH };
+
+  /* ---------- DOM ---------- */
+  var canvas = document.getElementById('wheel'), ctx = canvas.getContext('2d');
+  var ctrl = document.getElementById('ctrl'), crumb = document.getElementById('crumb');
+  var hint = document.getElementById('hint'), backMain = document.getElementById('backMain');
+  var modal = document.getElementById('modal');
+  var mEmoji = document.getElementById('mEmoji'), mTitle = document.getElementById('mTitle'), mTip = document.getElementById('mTip');
+  var mBtn1 = document.getElementById('mBtn1'), mBtn2 = document.getElementById('mBtn2');
+  var cardsBox = document.getElementById('cardsBox'), meBox = document.getElementById('meBox');
+
+  var level = 'main', cur = WHEELS.main;
+  var size = 300, R = 130, cx = 150, cy = 150;
+  var rot = 0, speed = 0, state = 'idle', raf = null, lastTS = 0, lastIdx = -1, lastTick = 0, bulbPhase = 0, idleTimer = null;
+  var MAX_SPEED = 1400;
+
+  /* =========================================================
+     绘制
+     ========================================================= */
+  function resize() {
+    var area = document.querySelector('#p-wheel .wheel-area');
+    var s = Math.floor(Math.min(area.clientWidth, area.clientHeight, 470));
+    if (s < 200) s = 200;
+    size = s;
+    var dpr = Math.min(window.devicePixelRatio || 1, 3);
+    canvas.style.width = s + 'px'; canvas.style.height = s + 'px';
+    canvas.width = Math.round(s * dpr); canvas.height = Math.round(s * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cx = cy = s / 2; R = s / 2 - 24;
+    ctrl.style.width = ctrl.style.height = Math.round(R * 0.46) + 'px';
+    ctrl.style.fontSize = Math.round(R * 0.115) + 'px';
+    draw();
+  }
+  /* ---------- 布布 / 可可 专属狐狸图标 ----------
+     布布：橙色小狐狸 + 头顶呆毛
+     可可：粉色小狐狸 + 蝴蝶结 + 睫毛                                */
+  function foxColors(v) {
+    var keke = (v === 'keke');
+    return {
+      keke: keke,
+      c1: keke ? '#FFAFCC' : '#FF9A6C',      // 毛色
+      c2: keke ? '#E8557F' : '#E8701A',      // 耳内 / 呆毛
+      bow: '#FF5C8A', bowMid: '#FFD1E1',
+      blush: keke ? 'rgba(255,90,140,.35)' : 'rgba(232,112,26,.28)',
+      dk: '#4A3728', line: 'rgba(90,50,20,.45)'
+    };
+  }
+
+  function foxSvg(v, s) {
+    var c = foxColors(v);
+    var extra = c.keke
+      ? '<ellipse cx="53" cy="11" rx="6" ry="4.4" fill="' + c.bow + '" transform="rotate(-28 53 11)"/>'
+      + '<ellipse cx="65" cy="14" rx="6" ry="4.4" fill="' + c.bow + '" transform="rotate(28 65 14)"/>'
+      + '<circle cx="59" cy="12.5" r="2.6" fill="' + c.bowMid + '"/>'
+      + '<path d="M27 31 l-3.5 -3 M53 31 l3.5 -3" stroke="' + c.dk + '" stroke-width="1.6" stroke-linecap="round" fill="none"/>'
+      : '<path d="M38.5 13 q1.5 -10 9.5 -8.5 q-7.5 1 -5 9.5 z" fill="' + c.c2 + '"/>';
+    return '<svg viewBox="0 0 80 80" width="' + s + '" height="' + s + '" style="vertical-align:-' + (s * 0.12).toFixed(1) + 'px">'
+      + '<g stroke="' + c.line + '" stroke-width="2.2" stroke-linejoin="round">'
+      + '<path d="M22 26 L10 2 L38 12 Z" fill="' + c.c1 + '"/>'
+      + '<path d="M58 26 L70 2 L42 12 Z" fill="' + c.c1 + '"/>'
+      + '</g>'
+      + '<path d="M23 25 L16 10 L34 17 Z" fill="' + c.c2 + '"/>'
+      + '<path d="M57 25 L64 10 L46 17 Z" fill="' + c.c2 + '"/>'
+      + extra
+      + '<ellipse cx="40" cy="40" rx="26" ry="24" fill="' + c.c1 + '" stroke="' + c.line + '" stroke-width="2.2"/>'
+      + '<ellipse cx="40" cy="54" rx="15" ry="13" fill="#FFFDF6"/>'
+      + '<ellipse cx="31" cy="36" rx="3" ry="4" fill="' + c.dk + '"/>'
+      + '<ellipse cx="49" cy="36" rx="3" ry="4" fill="' + c.dk + '"/>'
+      + '<circle cx="30" cy="34.5" r="1.2" fill="#fff"/>'
+      + '<circle cx="48" cy="34.5" r="1.2" fill="#fff"/>'
+      + '<ellipse cx="22" cy="46" rx="5" ry="3.2" fill="' + c.blush + '"/>'
+      + '<ellipse cx="58" cy="46" rx="5" ry="3.2" fill="' + c.blush + '"/>'
+      + '<path d="M40 46 L35 50 L45 50 Z" fill="' + c.dk + '"/>'
+      + '<path d="M40 50 q0 5 -6 6 M40 50 q0 5 6 6" stroke="' + c.dk + '" stroke-width="1.6" fill="none" stroke-linecap="round"/>'
+      + '</svg>';
+  }
+
+  function drawFox(g, x, y, r, v) {
+    var c = foxColors(v);
+    g.save();
+    g.translate(x, y);
+    g.scale(r / 30, r / 30);
+    g.lineJoin = 'round'; g.lineCap = 'round';
+    g.strokeStyle = c.line; g.lineWidth = 2.2;
+    g.fillStyle = c.c1;
+    g.beginPath(); g.moveTo(-18, -14); g.lineTo(-30, -38); g.lineTo(-2, -28); g.closePath(); g.fill(); g.stroke();
+    g.beginPath(); g.moveTo(18, -14); g.lineTo(30, -38); g.lineTo(2, -28); g.closePath(); g.fill(); g.stroke();
+    g.fillStyle = c.c2;
+    g.beginPath(); g.moveTo(-17, -16); g.lineTo(-24, -30); g.lineTo(-6, -23); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(17, -16); g.lineTo(24, -30); g.lineTo(6, -23); g.closePath(); g.fill();
+    if (!c.keke) {                                        // 布布：呆毛
+      g.beginPath(); g.moveTo(-1.5, -27); g.quadraticCurveTo(1.5, -37, 9, -35);
+      g.quadraticCurveTo(2, -31, 4, -26); g.closePath(); g.fill();
+    } else {                                              // 可可：蝴蝶结 + 睫毛
+      g.fillStyle = c.bow;
+      g.beginPath(); g.ellipse(13, -29, 6, 4.4, -0.5, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.ellipse(25, -26, 6, 4.4, 0.5, 0, Math.PI * 2); g.fill();
+      g.fillStyle = c.bowMid;
+      g.beginPath(); g.arc(19, -27.5, 2.6, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = c.dk; g.lineWidth = 1.8;
+      g.beginPath(); g.moveTo(-13, -8); g.lineTo(-16.5, -11); g.stroke();
+      g.beginPath(); g.moveTo(13, -8); g.lineTo(16.5, -11); g.stroke();
+      g.strokeStyle = c.line; g.lineWidth = 2.2;
+    }
+    g.fillStyle = c.c1;
+    g.beginPath(); g.ellipse(0, 0, 26, 24, 0, 0, Math.PI * 2); g.fill(); g.stroke();
+    g.fillStyle = '#FFFDF6';
+    g.beginPath(); g.ellipse(0, 14, 15, 13, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = c.blush;
+    g.beginPath(); g.ellipse(-18, 6, 5, 3.2, 0, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(18, 6, 5, 3.2, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = c.dk;
+    g.beginPath(); g.ellipse(-9, -4, 3, 4, 0, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.ellipse(9, -4, 3, 4, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff';
+    g.beginPath(); g.arc(-10, -5.5, 1.2, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(8, -5.5, 1.2, 0, Math.PI * 2); g.fill();
+    g.fillStyle = c.dk;
+    g.beginPath(); g.moveTo(0, 6); g.lineTo(-5, 10); g.lineTo(5, 10); g.closePath(); g.fill();
+    g.strokeStyle = c.dk; g.lineWidth = 1.7;
+    g.beginPath(); g.moveTo(0, 10); g.quadraticCurveTo(0, 15, -6, 16); g.stroke();
+    g.beginPath(); g.moveTo(0, 10); g.quadraticCurveTo(0, 15, 6, 16); g.stroke();
+    g.restore();
+  }
+
+  function rad(d) { return d * Math.PI / 180; }
+  function lum(hex) {
+    var r = parseInt(hex.substr(1, 2), 16), g = parseInt(hex.substr(3, 2), 16), b = parseInt(hex.substr(5, 2), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  }
+
+  function draw() {
+    var items = cur.items, n = items.length, seg = 360 / n;
+    ctx.clearRect(0, 0, size, size);
+
+    var g = ctx.createLinearGradient(0, 0, size, size);
+    g.addColorStop(0, '#F6D365'); g.addColorStop(.5, '#E8A33D'); g.addColorStop(1, '#F6D365');
+    ctx.beginPath(); ctx.arc(cx, cy, R + 12, 0, Math.PI * 2);
+    ctx.lineWidth = 20; ctx.strokeStyle = g; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, R + 22, 0, Math.PI * 2);
+    ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.stroke();
+
+    for (var b = 0; b < 12; b++) {
+      var a = rad(b * 30 - 90), on = (b + bulbPhase) % 2 === 0;
+      ctx.beginPath(); ctx.arc(cx + Math.cos(a) * (R + 12), cy + Math.sin(a) * (R + 12), 3.6, 0, Math.PI * 2);
+      ctx.fillStyle = on ? '#FFFBE0' : '#E0A63A'; ctx.fill();
+      if (on) { ctx.shadowColor = '#FFE9A0'; ctx.shadowBlur = 8; ctx.fill(); ctx.shadowBlur = 0; }
+    }
+
+    ctx.save(); ctx.translate(cx, cy);
+    for (var i = 0; i < n; i++) {
+      var st = rad(i * seg + rot), en = rad((i + 1) * seg + rot);
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, R, st, en); ctx.closePath();
+      ctx.fillStyle = items[i].color; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save(); ctx.translate(cx, cy);
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (var k = 0; k < n; k++) {
+      var it = items[k], mid = rad(k * seg + seg / 2 + rot);
+      var dx = Math.cos(mid), dy = Math.sin(mid);
+      // 图标：布布/可可用手绘狐狸，其余用 emoji
+      if (it.iconFox) {
+        drawFox(ctx, dx * R * 0.35, dy * R * 0.35, R * 0.11, it.iconFox);
+      } else if (it.emoji) {
+        ctx.font = Math.round(R * (n <= 4 ? 0.14 : 0.19)) + 'px -apple-system, "Apple Color Emoji", "Segoe UI Emoji", sans-serif';
+        var er = n <= 4 ? R * 0.80 : R * 0.40;
+        ctx.fillText(it.emoji, dx * er, dy * er);
+      }
+      // 文字
+      var darkText = lum(it.color) > 0.62;
+      ctx.fillStyle = darkText ? '#7A4A22' : '#FFFFFF';
+      var strokeC = darkText ? 'rgba(255,255,255,.85)' : 'rgba(90,50,20,.35)';
+      if (n <= 4 && it.label) {                       // 少扇区：中心横排多行
+        var lines = it.label, lh = Math.round(R * 0.15);
+        ctx.font = '800 ' + Math.round(R * 0.12) + 'px -apple-system, "PingFang SC", sans-serif';
+        for (var L = 0; L < lines.length; L++) {
+          var yy = dy * R * 0.55 + (L - (lines.length - 1) / 2) * lh;
+          var xx = dx * R * 0.55;
+          ctx.lineWidth = 3; ctx.strokeStyle = strokeC; ctx.strokeText(lines[L], xx, yy);
+          ctx.fillText(lines[L], xx, yy);
+        }
+      } else {                                        // 多扇区：沿半径排列
+        var chars = it.text.split(''), cn = chars.length;
+        var avail = R * 0.90 - R * 0.55;
+        var step = Math.min(19, avail / Math.max(cn, 1));
+        var fs = Math.min(19, step * 1.04);
+        ctx.font = '800 ' + fs.toFixed(1) + 'px -apple-system, "PingFang SC", sans-serif';
+        // 读序规则：第一个字永远排在「视觉上更靠上」的一端；
+        // 只在扇区几乎水平（|dy| ≈ 0）时才用左右判定，避免旋转时读序突然翻转。
+        var outward = (Math.abs(dy) > 0.08) ? (dy > 0) : (dx > 0);
+        var span = (cn - 1) * step, rc = (R * 0.90 + R * 0.55) / 2;
+        for (var c = 0; c < cn; c++) {
+          var off = outward ? (-span / 2 + c * step) : (span / 2 - c * step);
+          var rr = rc + off, x = dx * rr, y = dy * rr;
+          ctx.lineWidth = 3; ctx.strokeStyle = strokeC; ctx.strokeText(chars[c], x, y);
+          ctx.fillText(chars[c], x, y);
+        }
+      }
+    }
+    ctx.restore();
+
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.27, 0, Math.PI * 2);
+    ctx.fillStyle = '#FFFDF6'; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = '#F0B552'; ctx.stroke();
+
+    var px = cx, pyTop = cy - R - 26, pyTip = cy - R + 10;
+    var pg = ctx.createLinearGradient(px, pyTop, px, pyTip);
+    pg.addColorStop(0, '#FF7A6B'); pg.addColorStop(1, '#E23B2E');
+    ctx.beginPath(); ctx.moveTo(px, pyTip); ctx.lineTo(px - 13, pyTop);
+    ctx.quadraticCurveTo(px, pyTop - 6, px + 13, pyTop); ctx.closePath();
+    ctx.fillStyle = pg; ctx.fill();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = '#FFFFFF'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(px, pyTop + 2, 5, 0, Math.PI * 2);
+    ctx.fillStyle = '#FFF3D6'; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#E23B2E'; ctx.stroke();
+  }
+
+  function indexAt(r) {
+    var seg = 360 / cur.items.length;
+    var a = ((-90 - r) % 360 + 360) % 360;
+    return Math.floor(a / seg) % cur.items.length;
+  }
+
+  /* ---------- 音效 ---------- */
+  var audioCtx = null, muted = false;
+  function ensureAudio() {
+    if (!audioCtx) { var AC = window.AudioContext || window.webkitAudioContext; if (AC) { try { audioCtx = new AC(); } catch (e) {} } }
+    if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  }
+  function beep(f, d, t, v) {
+    if (muted || !audioCtx) return;
+    try {
+      var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = t; o.frequency.value = f;
+      var now = audioCtx.currentTime;
+      g.gain.setValueAtTime(v, now); g.gain.exponentialRampToValueAtTime(0.001, now + d);
+      o.connect(g); g.connect(audioCtx.destination); o.start(now); o.stop(now + d + 0.02);
+    } catch (e) {}
+  }
+  function tickSound() { var t = performance.now(); if (t - lastTick < 55) return; lastTick = t; beep(1500, .03, 'square', .04); }
+  function winSound() { [523, 659, 784, 1047].forEach(function (f, i) { setTimeout(function () { beep(f, .18, 'triangle', .07); }, i * 110); }); }
+  function mehSound() { [392, 294].forEach(function (f, i) { setTimeout(function () { beep(f, .22, 'sine', .06); }, i * 150); }); }
+  function mergeSound() { [659, 880, 1175].forEach(function (f, i) { setTimeout(function () { beep(f, .2, 'triangle', .07); }, i * 90); }); }
+
+  /* ---------- 旋转 ---------- */
+  function startBlink() { stopBlink(); idleTimer = setInterval(function () { bulbPhase++; draw(); }, 500); }
+  function stopBlink() { if (idleTimer) { clearInterval(idleTimer); idleTimer = null; } }
+
+  function startSpin() {
+    ensureAudio(); stopBlink(); state = 'spinning';
+    ctrl.textContent = '停止'; ctrl.classList.add('running');
+    lastTS = performance.now(); lastIdx = indexAt(rot);
+    cancelAnimationFrame(raf); raf = requestAnimationFrame(spinFrame);
+  }
+  function spinFrame(ts) {
+    var dt = Math.min(0.05, (ts - lastTS) / 1000); lastTS = ts;
+    speed = MAX_SPEED + (speed - MAX_SPEED) * Math.exp(-dt / 0.42);
+    rot = (rot + speed * dt) % 360;
+    var i = indexAt(rot);
+    if (i !== lastIdx) { lastIdx = i; tickSound(); }
+    draw(); raf = requestAnimationFrame(spinFrame);
+  }
+  function stopSpin() {
+    if (state !== 'spinning') return;
+    state = 'stopping'; ctrl.textContent = '停止中'; ctrl.disabled = true;
+    var idx = Math.floor(Math.random() * cur.items.length);
+    var jitter = (Math.random() - 0.5) * (360 / cur.items.length) * 0.62;
+    var local = idx * (360 / cur.items.length) + (360 / cur.items.length) / 2 + jitter;
+    var desired = ((-90 - local) % 360 + 360) % 360;
+    var base = ((desired - rot) % 360 + 360) % 360;
+    var v = Math.max(speed, 150), T = 2.4 + Math.random() * 0.9;
+    var turns = Math.max(2, Math.ceil((v * T / 4 - base) / 360));
+    var delta = turns * 360 + base;
+    T = Math.min(4.5, Math.max(1.2, 4 * delta / v));
+    var startRot = rot, t0 = performance.now(), li = indexAt(rot);
+    cancelAnimationFrame(raf);
+    (function frame(ts) {
+      var p = Math.min(1, (ts - t0) / (T * 1000));
+      rot = (startRot + delta * (1 - Math.pow(1 - p, 4))) % 360;
+      var i2 = indexAt(rot); if (i2 !== li) { li = i2; tickSound(); }
+      draw();
+      if (p < 1) raf = requestAnimationFrame(frame); else finish(idx);
+    })(performance.now());
+  }
+  function finish(idx) {
+    state = 'idle'; speed = 0;
+    ctrl.textContent = '开始'; ctrl.classList.remove('running'); ctrl.disabled = false;
+    startBlink(); S.spins++;
+    var item = cur.items[idx];
+    try { if (navigator.vibrate) navigator.vibrate(item.key === 'none' ? 25 : [18, 40, 28]); } catch (e) {}
+    if (cur.isMain) onMainResult(item); else onSubResult(item);
+  }
+
+  /* ---------- 结果处理 ---------- */
+  function onMainResult(item) {
+    if (!item.next) {
+      mehSound();
+      showModal({ emoji: '🙈', title: '谢谢惠顾', tip: '这次什么也没有，再转一次试试运气～',
+        b1: null, b2: '收下', onOk: hideModal });
+      return;
+    }
+    winSound();
+    var w = WHEELS[item.next];
+    showModal({
+      emoji: item.emoji, iconFox: item.iconFox, title: '转到「' + item.text + '」',
+      tip: '进入「' + w.title + '」，继续转就能拿到属于你的东西！',
+      b1: '待会儿再说', b2: '继续 →',
+      onOk: function () { hideModal(); setLevel(item.next); },
+      onCancel: hideModal
+    });
+  }
+
+  function onSubResult(item) {
+    var tip = '', emoji = item.emoji || '🎁', title = item.text;
+
+    if (cur.isRole) {
+      var role = cur.role, i = item.idx, rname = roleName(role);
+      S.frag[role][i]++;
+      var have = S.frag[role][i];
+      title = rname + '·' + EMO[i].name + ' 碎片';
+      if (S.card[role][i]) {
+        tip = '已经有过这张卡啦，碎片 +1（当前 ' + have + ' 个，可留着换卡）';
+      } else if (have >= 3) {
+        tip = '🎉 碎片已集满 3 个！去「角色卡片」合成完整的 ' + rname + '·' + EMO[i].name + ' 卡吧！';
+      } else {
+        tip = '获得碎片 1 个，还差 ' + (3 - have) + ' 个就能合成完整卡片';
+      }
+      pushLog(EMO[i].emoji, rname + '·' + EMO[i].name + '碎片');
+      winSound(); confetti();
+    } else if (cur.isReward) {
+      if (item.key === 'm1') { S.money += 1; tip = '奖励金 +1 元，已存入个人中心'; pushLog('🪙', '奖励 1 元'); }
+      else if (item.key === 'm2') { S.money += 2; tip = '奖励金 +2 元，已存入个人中心'; pushLog('💰', '奖励 2 元'); }
+      else if (item.key === 'bird') { S.bird++; tip = '小鸟卡片 +1（8 张可合成 1 张小鸭卡片）'; pushLog('🐦', '小鸟卡片'); }
+      else if (item.key === 'chick') { S.chick++; tip = '小鸡卡片 +1（2 张可合成 1 张小鸭卡片）'; pushLog('🐤', '小鸡卡片'); }
+      else if (item.key === 'duck') { S.duck++; tip = '小鸭卡片 +1（10 张可兑换小鸡盲盒）'; pushLog('🦆', '小鸭卡片'); }
+      else { mehSound(); tip = '这次的奖励轮空啦，下次加油～'; pushLog('🙈', '奖励·谢谢惠顾'); }
+      if (item.key !== 'none') { winSound(); confetti(); }
+    } else if (cur.isPunish) {
+      S.punish[item.key]++;
+      tip = '接受挑战吧！惩罚已记录到个人中心';
+      pushLog(item.emoji, '惩罚·' + item.text);
+      mehSound();
+    }
+    save(); renderCards(); renderMe();
+    // 子转盘转完只给一个出口：返回主转盘
+    showModal({
+      emoji: emoji, title: title, tip: tip,
+      b1: null, b2: '返回主转盘',
+      onOk: function () { hideModal(); setLevel('main'); }
+    });
+  }
+
+  function setLevel(id) {
+    level = id; cur = WHEELS[id];
+    crumb.innerHTML = '';
+    var sp = document.createElement('span');
+    sp.textContent = cur.title;
+    crumb.appendChild(sp);
+    if (!cur.isMain) {
+      var tag = document.createElement('span');
+      tag.className = 'tag'; tag.textContent = '（子转盘）';
+      crumb.appendChild(tag);
+    }
+    backMain.style.display = cur.isMain ? 'none' : 'inline-block';
+    hint.textContent = cur.isMain ? '转到「谢谢惠顾」就结束，转到其他区域会进入对应的子转盘'
+                                  : '这是子转盘，转完记得点「返回主转盘」';
+    draw();
+  }
+
+  function roleName(id) { for (var i = 0; i < ROLES.length; i++) if (ROLES[i].id === id) return ROLES[i].name; return id; }
+  function roleIcon(r, s) { return r.iconFox ? foxSvg(r.iconFox, s) : '<span style="font-size:' + s + 'px">' + r.emoji + '</span>'; }
+  function pushLog(e, t) { S.log.unshift({ e: e, t: t, d: Date.now() }); if (S.log.length > 40) S.log.length = 40; }
+
+  /* ---------- 弹窗 ---------- */
+  var cb1 = null, cb2 = null;
+  function showModal(cfg) {
+    if (cfg.iconFox) mEmoji.innerHTML = foxSvg(cfg.iconFox, 56);
+    else mEmoji.textContent = cfg.emoji || '🎉';
+    mTitle.textContent = cfg.title; mTip.textContent = cfg.tip;
+    cb1 = cfg.onCancel || null; cb2 = cfg.onOk || null;
+    mBtn1.style.display = cfg.b1 ? '' : 'none'; mBtn1.textContent = cfg.b1 || '';
+    mBtn2.textContent = cfg.b2 || '好耶';
+    modal.classList.add('show');
+  }
+  function hideModal() { modal.classList.remove('show'); }
+  mBtn1.addEventListener('click', function () { hideModal(); if (cb1) cb1(); });
+  mBtn2.addEventListener('click', function () { if (cb2) cb2(); else hideModal(); });
+  modal.addEventListener('click', function (e) { if (e.target === modal) hideModal(); });
+
+  function confetti() {
+    var colors = ['#FF8A65', '#FFD54F', '#AED581', '#4DB6AC', '#64B5F6', '#F06292', '#9575CD'];
+    for (var i = 0; i < 26; i++) {
+      var d = document.createElement('div');
+      d.className = 'confetti';
+      d.style.left = (Math.random() * 100) + 'vw';
+      d.style.background = colors[i % colors.length];
+      d.style.animation = 'fall ' + (1.3 + Math.random() * 0.9) + 's linear ' + (Math.random() * 0.4) + 's forwards';
+      document.body.appendChild(d);
+      (function (el) { setTimeout(function () { el.remove(); }, 2800); })(d);
+    }
+  }
+
+  /* ---------- B 角色卡片页 ---------- */
+  function renderCards() {
+    var html = '';
+    ROLES.forEach(function (r) {
+      var owned = S.card[r.id].filter(Boolean).length;
+      var ready = 0;
+      for (var i = 0; i < 6; i++) if (!S.card[r.id][i] && S.frag[r.id][i] >= 3) ready++;
+      html += '<div class="role-box">';
+      html += '<div class="role-head"><span class="dot" style="background:' + r.color + '"></span>'
+            + '<span style="display:flex;align-items:center;gap:4px">' + roleIcon(r, 22) + ' ' + r.name + '表情卡</span>'
+            + '<span class="cnt">已收集 ' + owned + '/6' + (ready ? ' · 可合成 ' + ready : '') + '</span></div>';
+      html += '<div class="grid">';
+      EMO.forEach(function (e, i) {
+        var fr = S.frag[r.id][i], has = S.card[r.id][i];
+        var cls = has ? 'cell owned' : (fr >= 3 ? 'cell ready' : 'cell');
+        html += '<div class="' + cls + '">';
+        html += '<div class="em">' + e.emoji + '</div>';
+        html += '<div class="nm">' + e.name + '</div>';
+        if (has) html += '<div class="pg">✓ 已获得</div>';
+        else {
+          html += '<div class="pg">碎片 ' + fr + '/3</div>';
+          if (fr >= 3) html += '<button class="btn-merge" data-merge="' + r.id + ':' + i + '">合成卡片</button>';
+        }
+        html += '</div>';
+      });
+      html += '</div></div>';
+    });
+    var hasAny = false;
+    ROLES.forEach(function (r) { for (var i = 0; i < 6; i++) if (!S.card[r.id][i] && S.frag[r.id][i] >= 3) hasAny = true; });
+    html += '<div class="sec-title">合成说明<span class="pill">' + (hasAny ? '有可合成的卡' : '继续收集碎片') + '</span></div>';
+    html += '<div class="role-box" style="font-size:12px;color:#8A6A50;line-height:1.7">'
+          + '· 主转盘转到「布布 / 可可 / 小鱼角色」→ 进入对应表情子转盘<br>'
+          + '· 子转盘 6 个表情，转到哪个就得哪个<b>碎片</b><br>'
+          + '· 同一种表情集满 <b>3 个碎片</b> → 合成 1 张完整<b>角色卡</b><br>'
+          + '· 每个角色 6 张表情卡，集齐即通关</div>';
+    cardsBox.innerHTML = html;
+  }
+
+  cardsBox.addEventListener('click', function (e) {
+    var t = e.target.closest ? e.target.closest('[data-merge]') : null;
+    if (!t) return;
+    var p = t.getAttribute('data-merge').split(':');
+    var role = p[0], i = parseInt(p[1], 10);
+    if (S.card[role][i] || S.frag[role][i] < 3) return;
+    S.frag[role][i] -= 3; S.card[role][i] = true;
+    save(); renderCards(); renderMe(); mergeSound(); confetti();
+    showModal({ emoji: EMO[i].emoji, title: '合成成功！',
+      tip: '获得完整卡片：' + roleName(role) + '·' + EMO[i].name + ' 🎉',
+      b1: null, b2: '太棒了', onOk: hideModal });
+  });
+
+  /* ---------- C 个人中心 ---------- */
+  function renderMe() {
+    var punTotal = S.punish.squat + S.punish.frog + S.punish.hw;
+    var html = '';
+    html += '<div class="me-card">';
+    html += '<div class="sec-title" style="margin-top:0">💰 我的奖励金</div>';
+    html += '<div class="money-row"><span class="big">' + S.money + '</span><span class="unit">元</span>'
+          + '<span class="note">累计抽奖 ' + S.spins + ' 次</span></div>';
+    html += '<div class="chips">';
+    html += chip('🐦', S.bird, '小鸟卡片');
+    html += chip('🐤', S.chick, '小鸡卡片');
+    html += chip('🦆', S.duck, '小鸭卡片');
+    html += chip('🎁', S.box, '小鸡盲盒');
+    html += '</div></div>';
+
+    html += '<div class="me-card"><div class="sec-title" style="margin-top:0">🦆 合成小鸭卡片</div>';
+    EXCHANGE.forEach(function (x) {
+      if (x.to !== 'duck') return;
+      html += exRow(x);
+    });
+    html += '<div class="sec-title">🎁 兑换小鸡盲盒</div>';
+    EXCHANGE.forEach(function (x) {
+      if (x.to !== 'box') return;
+      html += exRow(x);
+    });
+    html += '<div style="font-size:11px;color:#B39A82;margin-top:6px;line-height:1.7">'
+          + '兑换链路：8 张小鸟卡 → 1 张小鸭卡<br>'
+          + '　　　　　2 张小鸡卡 → 1 张小鸭卡<br>'
+          + '　　　　　10 张小鸭卡 → 1 个小鸡盲盒<br>'
+          + '奖励转盘共 10 格：小鸟 4 格 · 小鸡 2 格 · 小鸭 1 格 · 1元/2元/谢谢惠顾 各 1 格</div>';
+    html += '</div>';
+
+    html += '<div class="me-card"><div class="sec-title" style="margin-top:0">⚡ 我的惩罚 <span class="pill">共 ' + punTotal + ' 次</span></div>';
+    html += '<div class="pun-list">';
+    PUNISH.forEach(function (p) {
+      html += '<div class="pun-item"><span>' + p.emoji + '</span><span>' + p.text + '</span><span class="c">' + S.punish[p.key] + ' 次</span></div>';
+    });
+    html += '</div></div>';
+
+    html += '<div class="me-card"><div class="sec-title" style="margin-top:0">📜 最近记录</div>';
+    if (!S.log.length) html += '<div style="font-size:12px;color:#B39A82">还没有记录，去转盘试试吧～</div>';
+    else {
+      html += '<ul class="log-list">';
+      S.log.slice(0, 12).forEach(function (r) {
+        var d = new Date(r.d), hh = ('0' + d.getHours()).slice(-2), mm = ('0' + d.getMinutes()).slice(-2);
+        html += '<li><span>' + r.e + '</span><span>' + r.t + '</span><span class="t">' + hh + ':' + mm + '</span></li>';
+      });
+      html += '</ul>';
+    }
+    html += '</div>';
+    html += '<button class="danger" id="reset">清空全部数据</button>';
+    meBox.innerHTML = html;
+  }
+  function chip(e, v, n) {
+    return '<div class="chip"><div class="em">' + e + '</div><div class="v">' + v + '</div><div class="n">' + n + '</div></div>';
+  }
+  function exRow(x) {
+    var have = S[x.key], ok = have >= x.need, lack = x.need - have;
+    var unit = (x.to === 'box') ? '个' : '张';
+    return '<div class="ex-row"><span style="font-size:20px">' + x.emoji + '</span>'
+         + '<span class="txt">' + x.need + ' 张' + x.name + ' → 1 ' + unit + x.toName
+         + '<br><b>已有 ' + have + ' / ' + x.need + '</b>' + (ok ? '' : '（还差 ' + lack + '）') + '</span>'
+         + '<button class="ex-btn" data-ex="' + x.key + '"' + (ok ? '' : ' disabled') + '>' + x.verb + '</button></div>';
+  }
+
+  meBox.addEventListener('click', function (e) {
+    var ex = e.target.closest ? e.target.closest('[data-ex]') : null;
+    if (ex) {
+      var key = ex.getAttribute('data-ex');
+      var cfg = null;
+      EXCHANGE.forEach(function (x) { if (x.key === key) cfg = x; });
+      if (!cfg || S[key] < cfg.need) return;
+      S[key] -= cfg.need; S[cfg.to]++; save(); renderMe(); winSound(); confetti();
+      var unit = (cfg.to === 'box') ? '个' : '张';
+      showModal({ emoji: cfg.toEmoji,
+        title: cfg.verb + '成功！',
+        tip: '用 ' + cfg.need + ' 张' + cfg.name + ' ' + cfg.verb + ' 1 ' + unit + cfg.toName + ' ' + cfg.toEmoji,
+        b1: null, b2: '开心', onOk: hideModal });
+      return;
+    }
+    if (e.target.id === 'reset') {
+      if (!confirm('确定清空全部数据？碎片、卡片、奖励和记录都会没有哦')) return;
+      S = defaultState(); save(); renderCards(); renderMe();
+    }
+  });
+
+  /* ---------- 交互 ---------- */
+  ctrl.addEventListener('click', function () {
+    ensureAudio();
+    if (state === 'idle') startSpin(); else if (state === 'spinning') stopSpin();
+  });
+  backMain.addEventListener('click', function () { setLevel('main'); });
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+      document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('on'); });
+      t.classList.add('on');
+      document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active'); });
+      document.getElementById(t.getAttribute('data-page')).classList.add('active');
+      if (t.getAttribute('data-page') === 'p-wheel') { resize(); }
+    });
+  });
+  document.getElementById('sound').addEventListener('click', function () {
+    muted = !muted;
+    document.getElementById('sound').textContent = muted ? '🔈' : '🔊';
+    if (!muted) { ensureAudio(); beep(880, .08, 'triangle', .06); }
+  });
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', function () { setTimeout(resize, 250); });
+  document.addEventListener('gesturestart', function (e) { e.preventDefault(); });
+
+  /* ---------- 启动 ---------- */
+  resize(); setLevel('main'); renderCards(); renderMe(); startBlink();
+})();
+</script>
+</body>
+</html>
