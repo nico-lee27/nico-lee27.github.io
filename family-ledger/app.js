@@ -39,6 +39,8 @@ const S = {
   expanded: {},       // 全部模式下展开的月份
   syncing: false,
   dirty: false,
+  dataReady: false,   // 已完成至少一次数据装载（本地缓存或云端拉取），未就绪时看板显示「—」而非 ¥0
+  cacheSrc: '',       // 本次启动数据来自哪个缓存：local | idb | ''
 };
 
 /* ========== 工具 ========== */
@@ -67,19 +69,64 @@ function toast(msg) {
 }
 
 /* ========== 存储 ========== */
+/* 缓存双写：localStorage 为主，IndexedDB 为备。
+   iOS 会不定期清掉主屏幕 App 的 localStorage，清掉后每次打开都要等云端拉取；
+   多写一份 IndexedDB，命中率更高，首屏就能直接出数。 */
+const IDB = {
+  _db: null,
+  open() {
+    if (this._db) return Promise.resolve(this._db);
+    return new Promise((res, rej) => {
+      try {
+        const rq = indexedDB.open('family-ledger', 1);
+        rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains('kv')) rq.result.createObjectStore('kv'); };
+        rq.onsuccess = () => { this._db = rq.result; res(rq.result); };
+        rq.onerror = () => rej(rq.error);
+      } catch (e) { rej(e); }
+    });
+  },
+  async set(k, v) {
+    try { const db = await this.open(); db.transaction('kv', 'readwrite').objectStore('kv').put(v, k); } catch (e) { }
+  },
+  async get(k) {
+    try {
+      const db = await this.open();
+      return await new Promise(res => {
+        const rq = db.transaction('kv').objectStore('kv').get(k);
+        rq.onsuccess = () => res(rq.result); rq.onerror = () => res(null);
+      });
+    } catch (e) { return null; }
+  },
+};
+
 function saveLocal() {
+  const snap = { records: S.records, sha: S.sha, meta: S.meta, at: Date.now() };
   try {
-    localStorage.setItem(LS_DATA, JSON.stringify({ records: S.records, sha: S.sha, meta: S.meta, at: Date.now() }));
-  } catch (e) { toast('本地存储写入失败'); }
+    localStorage.setItem(LS_DATA, JSON.stringify(snap));
+  } catch (e) { /* 配额满等，忽略，还有 IDB 兜底 */ }
+  IDB.set('data', snap);
+  S.cacheSrc = 'local';
 }
 function loadLocal() {
   try {
     const raw = localStorage.getItem(LS_DATA);
-    if (!raw) return false;
-    const o = JSON.parse(raw);
-    S.records = o.records || []; S.sha = o.sha || null; S.meta = o.meta || null;
-    return S.records.length > 0;
-  } catch (e) { return false; }
+    if (raw) {
+      const o = JSON.parse(raw);
+      S.records = o.records || []; S.sha = o.sha || null; S.meta = o.meta || null;
+      if (S.records.length > 0) { S.cacheSrc = 'local'; return true; }
+    }
+  } catch (e) { }
+  return false;
+}
+async function loadLocalFallback() {          // localStorage 被清时的兜底
+  const o = await IDB.get('data');
+  if (o && o.records && o.records.length) {
+    S.records = o.records; S.sha = o.sha || null; S.meta = o.meta || null;
+    S.cacheSrc = 'idb';
+    localStorage.setItem(LS_DATA, JSON.stringify(o));   // 顺手补回 localStorage
+    return true;
+  }
+  return false;
 }
 function saveCfg() {
   localStorage.setItem(LS_CFG, JSON.stringify(S.cfg));
@@ -188,7 +235,11 @@ async function syncNow() {
   } catch (e) {
     setSync('err', '同步失败');
     log('× ' + e.message);
-  } finally { S.syncing = false; }
+  } finally {
+    S.syncing = false;
+    S.dataReady = true;          // 无论成败，装载流程已走完，占位符可以撤掉
+    if (S.view === 'board') renderBoard();
+  }
 }
 
 /* ========== 渲染：筛选与列表 ========== */
@@ -282,7 +333,9 @@ function renderBoard() {
 
   const total = rs.reduce((s, r) => s + r.amount, 0);
   const max = rs.reduce((m, r) => Math.max(m, r.amount), 0);
-  const loading = rs.length === 0 && S.syncing;   // 首次拉取时显示占位，而不是 ¥0
+  // 首次打开且本地无缓存时，同步还没跑起来（S.syncing 仍为 false），
+  // 用 dataReady 兜底：只要还没完成过一次装载，就显示「—」，绝不显示 ¥0
+  const loading = rs.length === 0 && (S.syncing || !S.dataReady);
   let days = 0;
   if (cur) {
     const isCurMonth = cur === monthOf(todayStr());
@@ -294,6 +347,7 @@ function renderBoard() {
   $('kCount').textContent = loading ? '—' : String(rs.length);
   $('kAvg').textContent = loading ? '—' : money0(total / (days || 1));
   $('kMax').textContent = loading ? '—' : money0(max);
+  ['kTotal', 'kCount', 'kAvg', 'kMax'].forEach(id => $(id).classList.toggle('wait', loading));
 
   // 环比
   if (prev) {
@@ -349,7 +403,7 @@ function renderBoard() {
 }
 
 /* ---- 折线图（支持捏合缩放 / 拖动平移） ---- */
-let chart = { months: [], vals: [], i0: 0, i1: 0, n: 0 };
+let chart = { months: [], vals: [], i0: 0, i1: 0, n: 0, pick: null, _geo: null };
 
 function buildMonthly() {
   const byM = new Map();
@@ -381,17 +435,20 @@ function drawChart() {
   g.clearRect(0, 0, w, h);
   if (chart.n === 0) return;
 
-  const P = { l: 42, r: 10, t: 12, b: 24 };
+  const P = { l: 40, r: 10, t: 26, b: 38 };   // 顶部留给金额标注，底部留给月份标签
   const pw = w - P.l - P.r, ph = h - P.t - P.b;
   const i0 = Math.max(0, Math.floor(chart.i0)), i1 = Math.min(chart.n - 1, Math.ceil(chart.i1));
   const idxs = []; for (let i = i0; i <= i1; i++) idxs.push(i);
   const vals = idxs.map(i => chart.vals[i]);
   const maxV = Math.max(...vals, 1);
   const nice = Math.pow(10, Math.floor(Math.log10(maxV)));
-  const top = Math.ceil(maxV / (nice / 2)) * (nice / 2) || 1;
+  // 顶部额外留 8% 余量：否则峰值那个月的金额标注会顶出画布被裁掉（9月/2月看不全的根因）
+  const top = (Math.ceil(maxV / (nice / 2)) * (nice / 2) || 1) * 1.08;
 
   const X = i => P.l + (idxs.length === 1 ? pw / 2 : (idxs.indexOf(i) / (idxs.length - 1)) * pw);
   const Y = v => P.t + ph - (v / top) * ph;
+  const axisY = P.t + ph;
+  const gap = idxs.length > 1 ? pw / (idxs.length - 1) : pw;
 
   // 网格 + Y 轴
   g.strokeStyle = '#ecebe6'; g.lineWidth = 1; g.font = '10px -apple-system,sans-serif'; g.fillStyle = '#a29e96';
@@ -399,6 +456,23 @@ function drawChart() {
     const v = top * k / 4, y = Y(v);
     g.beginPath(); g.moveTo(P.l, y); g.lineTo(w - P.r, y); g.stroke();
     g.textAlign = 'right'; g.textBaseline = 'middle'; g.fillText(fmtY(v), P.l - 6, y);
+  }
+
+  // 横轴基线
+  g.beginPath(); g.moveTo(P.l, axisY); g.lineTo(w - P.r, axisY);
+  g.strokeStyle = '#ddd9d1'; g.lineWidth = 1; g.stroke();
+
+  // 数据 ↔ 横轴对应线：每个月从数据点垂直引到横轴并带刻度，一眼看清这个点对应哪个月
+  if (gap >= 12) {
+    idxs.forEach(i => {
+      const isCur = chart.months[i] === monthOf(todayStr());
+      g.beginPath(); g.setLineDash(isCur ? [3, 3] : [2, 4]);
+      g.moveTo(X(i), Y(chart.vals[i])); g.lineTo(X(i), axisY);
+      g.strokeStyle = isCur ? 'rgba(200,102,63,.45)' : '#e4e1da'; g.lineWidth = 1; g.stroke();
+      g.setLineDash([]);
+      g.beginPath(); g.moveTo(X(i), axisY); g.lineTo(X(i), axisY + 3);
+      g.strokeStyle = isCur ? '#c8663f' : '#d5d1c8'; g.lineWidth = 1; g.stroke();
+    });
   }
 
   // 面积
@@ -414,32 +488,72 @@ function drawChart() {
   idxs.forEach((i, k) => k ? g.lineTo(X(i), Y(chart.vals[i])) : g.moveTo(X(i), Y(chart.vals[i])));
   g.strokeStyle = '#c8663f'; g.lineWidth = 2; g.lineJoin = 'round'; g.stroke();
 
-  // 点 + X 轴标签（标签用短格式，尽量每个月都标出来）
-  const mlabel = m => { const [y, mo] = m.split('-'); return mo === '01' ? y.slice(2) + '/1' : String(+mo); };
+  // 横轴月份标签：统一 26/10 格式，每个月都标；间距不够时旋转 45° 避免挤在一起
+  const mlabel = m => m.slice(2).replace('-', '/');   // 2026-10 → 26/10
   const curM = monthOf(todayStr());
-  const step = Math.max(1, Math.ceil(idxs.length / Math.max(2, Math.floor(pw / 22))));
-  g.textAlign = 'center'; g.textBaseline = 'top';
-  idxs.forEach((i, k) => {
-    if (k % step === 0 || k === idxs.length - 1) {
-      g.fillStyle = chart.months[i] === curM ? '#c8663f' : '#a29e96';
-      g.font = '10px -apple-system,sans-serif';
-      g.fillText(mlabel(chart.months[i]), X(i), P.t + ph + 6);
-    }
-    if (idxs.length <= 30) {
+  const rotate = gap < 28;
+  idxs.forEach(i => {
+    const isCur = chart.months[i] === curM;
+    g.save();
+    g.translate(X(i), axisY + 7);
+    if (rotate) { g.rotate(-Math.PI / 4); g.textAlign = 'right'; g.textBaseline = 'middle'; }
+    else { g.textAlign = 'center'; g.textBaseline = 'top'; }
+    g.fillStyle = isCur ? '#c8663f' : '#a29e96';
+    g.font = (isCur ? '600 ' : '') + '9.5px -apple-system,sans-serif';
+    g.fillText(mlabel(chart.months[i]), 0, 0);
+    g.restore();
+  });
+
+  // 数据点
+  if (gap >= 10) {
+    idxs.forEach(i => {
       const isCur = chart.months[i] === curM;
-      g.beginPath(); g.arc(X(i), Y(chart.vals[i]), 3, 0, 7);
+      g.beginPath(); g.arc(X(i), Y(chart.vals[i]), isCur ? 3.5 : 3, 0, 7);
       g.fillStyle = isCur ? '#f2ede6' : '#fff'; g.fill();
       g.setLineDash(isCur ? [2, 2] : []);
       g.strokeStyle = '#c8663f'; g.lineWidth = 2; g.stroke();
       g.setLineDash([]);
-    }
+    });
+  }
+
+  // 金额标注：点少时逐月标，点多时只标峰值；上方空间不够就标到点的下方，任何情况都不会画到画布外
+  const mi = idxs.reduce((a, b) => chart.vals[a] >= chart.vals[b] ? a : b);
+  const showAll = idxs.length <= 8;
+  g.font = '600 10.5px -apple-system,sans-serif'; g.textAlign = 'center';
+  idxs.forEach(i => {
+    if (chart.vals[i] <= 0) return;
+    if (!showAll && i !== mi) return;
+    const yv = Y(chart.vals[i]);
+    g.fillStyle = i === mi ? '#1c1b19' : '#8d8880';
+    if (yv - 7 >= 13) { g.textBaseline = 'bottom'; g.fillText(money0(chart.vals[i]), X(i), yv - 7); }
+    else { g.textBaseline = 'top'; g.fillText(money0(chart.vals[i]), X(i), yv + 6); }
   });
 
-  // 当前区间峰值标注
-  const mi = idxs.reduce((a, b) => chart.vals[a] >= chart.vals[b] ? a : b);
-  g.fillStyle = '#1c1b19'; g.font = '600 11px -apple-system,sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom';
-  g.fillText(money0(chart.vals[mi]), X(mi), Y(chart.vals[mi]) - 8);
+  // 轻点选中的月份：高亮竖线 + 顶部气泡，任何一个月都能看到确切金额
+  if (chart.pick !== null && chart.pick >= i0 && chart.pick <= i1) {
+    const px = X(chart.pick), pv = chart.vals[chart.pick];
+    g.beginPath(); g.setLineDash([4, 3]);
+    g.moveTo(px, P.t); g.lineTo(px, axisY);
+    g.strokeStyle = 'rgba(200,102,63,.6)'; g.lineWidth = 1.5; g.stroke();
+    g.setLineDash([]);
+    g.beginPath(); g.arc(px, Y(pv), 5, 0, 7);
+    g.fillStyle = '#c8663f'; g.fill();
+    g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.stroke();
 
+    const txt = mlabel(chart.months[chart.pick]) + '  ' + money0(pv);
+    g.font = '600 11px -apple-system,sans-serif';
+    const tw = g.measureText(txt).width, bw = tw + 16, bh = 21;
+    let bx = px - bw / 2;
+    bx = Math.max(P.l - 4, Math.min(bx, w - P.r - bw + 4));
+    const by = 1;
+    g.fillStyle = '#1c1b19';
+    if (g.roundRect) { g.beginPath(); g.roundRect(bx, by, bw, bh, 6); g.fill(); }
+    else g.fillRect(bx, by, bw, bh);
+    g.fillStyle = '#fff'; g.textAlign = 'left'; g.textBaseline = 'middle';
+    g.fillText(txt, bx + 8, by + bh / 2 + 0.5);
+  }
+
+  chart._geo = { P, pw, ph, i0, i1, gap };
   $('chartRange').textContent = `${chart.months[i0]} ~ ${chart.months[i1]} · ${idxs.length} 个月 · 合计 ${money0(vals.reduce((a, b) => a + b, 0))}`;
 }
 
@@ -459,7 +573,7 @@ function initChartGesture() {
     if (e.touches.length === 2) {
       start = { mode: 'pinch', d: dist(e.touches), i0: chart.i0, i1: chart.i1 };
     } else if (e.touches.length === 1) {
-      start = { mode: 'pan', x: e.touches[0].clientX, i0: chart.i0, i1: chart.i1 };
+      start = { mode: 'pan', x: e.touches[0].clientX, y: e.touches[0].clientY, i0: chart.i0, i1: chart.i1 };
     }
   }, { passive: true });
 
@@ -480,7 +594,27 @@ function initChartGesture() {
     clampWin(); drawChart();
   }, { passive: false });
 
-  cv.addEventListener('touchend', () => { start = null; }, { passive: true });
+  // 轻点某个月 → 显示该月金额；再点同一个月取消
+  const pickAt = clientX => {
+    const geo = chart._geo; if (!geo || !chart.n) return;
+    const rect = cv.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const idx = Math.round(geo.i0 + (x - geo.P.l) / Math.max(geo.gap, 0.001));
+    if (idx < geo.i0 || idx > geo.i1) return;
+    chart.pick = (chart.pick === idx) ? null : idx;
+    drawChart();
+  };
+  cv.addEventListener('touchend', e => {
+    if (start && start.mode === 'pan' && e.changedTouches.length) {
+      const t = e.changedTouches[0];
+      if (Math.abs(t.clientX - start.x) < 10 && Math.abs((start.y ?? t.clientY) - t.clientY) < 10) {
+        pickAt(t.clientX);
+      }
+    }
+    start = null;
+  }, { passive: true });
+  cv.addEventListener('click', e => { if (Date.now() - (cv._lastTouch || 0) > 400) pickAt(e.clientX); });
+  cv.addEventListener('touchstart', () => { cv._lastTouch = Date.now(); }, { passive: true });
   cv.addEventListener('dblclick', resetZoom);
 
   // 桌面端鼠标拖动（便于调试）
@@ -623,8 +757,10 @@ function switchView(v) {
 function renderMeta() {
   const n = alive().length;
   const ds = alive().map(r => r.date).sort();
-  const hadLocal = !!localStorage.getItem(LS_DATA);
-  const cacheTip = hadLocal ? '本机有缓存，下次打开秒出' : '本机暂无缓存（首次打开或系统清过），每次要等云端拉取';
+  const hadLocal = !!localStorage.getItem(LS_DATA) || S.cacheSrc === 'idb';
+  const cacheTip = hadLocal
+    ? `本机有缓存（${S.cacheSrc === 'idb' ? '备用存储' : '标准存储'}），下次打开秒出`
+    : '本机暂无缓存（首次打开或系统清过），每次要等云端拉取';
   $('metaInfo').innerHTML = (S.meta && S.meta.source
     ? `${esc(S.meta.source)}<br>云端更新：${esc(S.meta.updatedAt || '—')}<br>本地记录：<b>${n}</b> 条${ds.length ? '，' + ds[0] + ' ~ ' + ds[ds.length - 1] : ''}`
     : `本地内置数据 <b>${n}</b> 条${ds.length ? '，' + ds[0] + ' ~ ' + ds[ds.length - 1] : ''}。填入 Token 后可与云端同步。`)
@@ -840,13 +976,22 @@ async function boot() {
   ['cfgToken', 'cfgOwner', 'cfgRepo', 'cfgBranch'].forEach(id => { $(id).value = S.cfg[id.slice(3).toLowerCase()] || ''; });
   $('cfgBranch').value = S.cfg.branch || 'main';
 
-  if (!loadLocal()) {
+  let hasLocal = loadLocal();
+  if (!hasLocal) hasLocal = await loadLocalFallback();
+  if (hasLocal) {
+    S.dataReady = true;          // 有本地缓存：首屏立刻出数，不必等云端
+  } else {
     try {
-      const res = await fetch(BUNDLED, { cache: 'no-store' });
+      // 云端版没有内置数据文件，加 3s 超时避免首屏被这个必定失败的兜底请求拖住
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 3000);
+      const res = await fetch(BUNDLED, { cache: 'no-store', signal: ctl.signal });
+      clearTimeout(timer);
       if (!res.ok) throw new Error('no bundled data');
       const j = await res.json();
       S.records = (j.records || []).map(r => ({ ...r, source: r.source || 'docs' }));
       S.meta = { source: j.source, updatedAt: j.updatedAt };
+      S.dataReady = true;
       saveLocal();
     } catch (e) {
       /* 云端版无内置数据属正常，靠同步拉取；隐藏「恢复内置数据」避免误点清空 */
@@ -859,6 +1004,7 @@ async function boot() {
     syncNow();
   } else {
     setSync('', '未配置');
+    S.dataReady = true;
     switchView('settings');
     toast('首次使用：请粘贴配置链接，或在下方填 Token');
   }

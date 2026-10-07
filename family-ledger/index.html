@@ -62,10 +62,10 @@
     <div class="range-label" id="rangeLabel"></div>
 
     <div class="kpi-grid">
-      <div class="kpi"><span class="kpi-v" id="kTotal">¥0</span><span class="kpi-k">总支出</span></div>
-      <div class="kpi"><span class="kpi-v" id="kCount">0</span><span class="kpi-k">笔数</span></div>
-      <div class="kpi"><span class="kpi-v" id="kAvg">¥0</span><span class="kpi-k">日均</span></div>
-      <div class="kpi"><span class="kpi-v" id="kMax">¥0</span><span class="kpi-k">最大单笔</span></div>
+      <div class="kpi"><span class="kpi-v wait" id="kTotal">—</span><span class="kpi-k">总支出</span></div>
+      <div class="kpi"><span class="kpi-v wait" id="kCount">—</span><span class="kpi-k">笔数</span></div>
+      <div class="kpi"><span class="kpi-v wait" id="kAvg">—</span><span class="kpi-k">日均</span></div>
+      <div class="kpi"><span class="kpi-v wait" id="kMax">—</span><span class="kpi-k">最大单笔</span></div>
     </div>
 
     <div class="card">
@@ -85,7 +85,7 @@
         月度趋势
         <button class="mini-btn" id="zoomReset">重置缩放</button>
       </div>
-      <div class="chart-hint">双指捏合缩放 · 单指左右拖动 · 虚线点为当月（还没过完）</div>
+      <div class="chart-hint">双指捏合缩放 · 单指左右拖动 · 虚线引导线对应横轴月份 · 橙色为当月（还没过完）</div>
       <div class="chart-wrap">
         <canvas id="lineChart"></canvas>
       </div>

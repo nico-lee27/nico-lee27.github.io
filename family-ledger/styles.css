@@ -131,6 +131,8 @@ code{background:#f0efea;padding:1px 5px;border-radius:5px;font-size:13px}
 .kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px 12px}
 .kpi{background:var(--card);border-radius:var(--r);padding:12px 14px}
 .kpi-v{display:block;font-size:20px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.3px}
+.kpi-v.wait{color:var(--t3);font-weight:500;animation:kpiPulse 1.1s ease-in-out infinite}
+@keyframes kpiPulse{0%,100%{opacity:.4}50%{opacity:.85}}
 .kpi-k{display:block;font-size:11.5px;color:var(--t3);margin-top:2px}
 
 .card{background:var(--card);border-radius:var(--r);margin:0 16px 12px;padding:14px}
@@ -159,7 +161,7 @@ code{background:#f0efea;padding:1px 5px;border-radius:5px;font-size:13px}
 .cb-fill{height:100%;border-radius:4px;background:var(--accent);transition:width .3s}
 
 .chart-hint{font-size:11px;color:var(--t3);margin:-4px 0 8px}
-.chart-wrap{position:relative;height:190px;margin:0 -4px}
+.chart-wrap{position:relative;height:222px;margin:0 -4px}
 #lineChart{width:100%;height:100%;display:block;touch-action:none}
 .chart-range{text-align:center;font-size:11.5px;color:var(--t3);margin-top:6px}
 
