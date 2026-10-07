@@ -278,10 +278,11 @@ function rangeRecords() {
 
 function renderBoard() {
   const { rs, label, cur, prev } = rangeRecords();
-  $('rangeLabel').textContent = label;
+  $('rangeLabel').textContent = label + (S.syncing ? ' · 同步中…' : '');
 
   const total = rs.reduce((s, r) => s + r.amount, 0);
   const max = rs.reduce((m, r) => Math.max(m, r.amount), 0);
+  const loading = rs.length === 0 && S.syncing;   // 首次拉取时显示占位，而不是 ¥0
   let days = 0;
   if (cur) {
     const isCurMonth = cur === monthOf(todayStr());
@@ -289,10 +290,10 @@ function renderBoard() {
   } else {
     const ds = new Set(rs.map(r => r.date)); days = ds.size || 1;
   }
-  $('kTotal').textContent = money0(total);
-  $('kCount').textContent = rs.length;
-  $('kAvg').textContent = money0(total / (days || 1));
-  $('kMax').textContent = money0(max);
+  $('kTotal').textContent = loading ? '—' : money0(total);
+  $('kCount').textContent = loading ? '—' : String(rs.length);
+  $('kAvg').textContent = loading ? '—' : money0(total / (days || 1));
+  $('kMax').textContent = loading ? '—' : money0(max);
 
   // 环比
   if (prev) {
@@ -312,15 +313,29 @@ function renderBoard() {
     $('momBox').innerHTML = `<span class="mom-txt">共 <b>${rs.length}</b> 笔，覆盖 <b>${new Set(rs.map(r => monthOf(r.date))).size}</b> 个月</span>`;
   }
 
-  // 分类占比
+  // 分类占比（每项带与上一同区间的环比：本月↔上月，上月↔上上月）
   const byCat = new Map();
   rs.forEach(r => byCat.set(r.category, (byCat.get(r.category) || 0) + r.amount));
+  const prevByCat = new Map();
+  if (prev) alive().filter(r => monthOf(r.date) === prev)
+    .forEach(r => prevByCat.set(r.category, (prevByCat.get(r.category) || 0) + r.amount));
+  const momTag = (c, v) => {
+    if (!prev) return '';
+    const pv = prevByCat.get(c) || 0;
+    if (pv <= 0) return v > 0 ? '<span class="cb-mom up">新增</span>' : '';
+    const d = v - pv;
+    if (Math.abs(d) < 1) return '<span class="cb-mom flat">持平</span>';
+    const pct = Math.abs(d / pv * 100);
+    return `<span class="cb-mom ${d > 0 ? 'up' : 'down'}">${d > 0 ? '↑' : '↓'}${money0(Math.abs(d))} · ${pct.toFixed(0)}%</span>`;
+  };
   const sorted = [...byCat].sort((a, b) => b[1] - a[1]);
+  const catHint = $('catHint');
+  if (catHint) catHint.textContent = prev ? '较 ' + ymLabel(prev) : '全部区间无环比';
   $('catBars').innerHTML = sorted.length ? sorted.map(([c, v]) => `
     <div class="cb"><div class="cb-t"><span class="cb-name">${CAT_EMOJI[c] || '📦'} ${esc(c)}</span>
-      <span class="cb-val">${money0(v)} · ${(v / total * 100).toFixed(1)}%</span></div>
+      <span class="cb-val">${money0(v)} · ${(v / total * 100).toFixed(1)}%${momTag(c, v)}</span></div>
       <div class="cb-track"><div class="cb-fill" style="width:${(v / total * 100).toFixed(2)}%"></div></div></div>`).join('')
-    : '<div class="note" style="margin:0">暂无数据</div>';
+    : '<div class="note" style="margin:0">' + (loading ? '同步中…' : '暂无数据') + '</div>';
 
   // Top5
   $('topList').innerHTML = rs.length ? [...rs].sort((a, b) => b.amount - a.amount).slice(0, 5).map((r, i) => `
@@ -339,9 +354,14 @@ let chart = { months: [], vals: [], i0: 0, i1: 0, n: 0 };
 function buildMonthly() {
   const byM = new Map();
   alive().forEach(r => byM.set(monthOf(r.date), (byM.get(monthOf(r.date)) || 0) + r.amount));
-  const months = [...byM.keys()].sort();
+  const keys = [...byM.keys()].sort();
+  let months = keys;
+  if (keys.length > 1) {          // 补上中间没有记录的月份，横轴才是真实时间等距
+    months = [];
+    for (let m = keys[0]; m <= keys[keys.length - 1]; m = shiftMonth(m, 1)) months.push(m);
+  }
   chart.months = months;
-  chart.vals = months.map(m => byM.get(m));
+  chart.vals = months.map(m => byM.get(m) || 0);
   chart.n = months.length;
   if (chart.i1 === 0 || chart.i1 >= chart.n) { chart.i0 = 0; chart.i1 = Math.max(0, chart.n - 1); }
 }
@@ -394,17 +414,24 @@ function drawChart() {
   idxs.forEach((i, k) => k ? g.lineTo(X(i), Y(chart.vals[i])) : g.moveTo(X(i), Y(chart.vals[i])));
   g.strokeStyle = '#c8663f'; g.lineWidth = 2; g.lineJoin = 'round'; g.stroke();
 
-  // 点 + X 轴标签
-  const step = Math.max(1, Math.ceil(idxs.length / Math.max(2, Math.floor(pw / 52))));
+  // 点 + X 轴标签（标签用短格式，尽量每个月都标出来）
+  const mlabel = m => { const [y, mo] = m.split('-'); return mo === '01' ? y.slice(2) + '/1' : String(+mo); };
+  const curM = monthOf(todayStr());
+  const step = Math.max(1, Math.ceil(idxs.length / Math.max(2, Math.floor(pw / 22))));
   g.textAlign = 'center'; g.textBaseline = 'top';
   idxs.forEach((i, k) => {
     if (k % step === 0 || k === idxs.length - 1) {
-      g.fillStyle = '#a29e96'; g.font = '10px -apple-system,sans-serif';
-      g.fillText(chart.months[i].slice(2).replace('-', '/'), X(i), P.t + ph + 6);
+      g.fillStyle = chart.months[i] === curM ? '#c8663f' : '#a29e96';
+      g.font = '10px -apple-system,sans-serif';
+      g.fillText(mlabel(chart.months[i]), X(i), P.t + ph + 6);
     }
     if (idxs.length <= 30) {
+      const isCur = chart.months[i] === curM;
       g.beginPath(); g.arc(X(i), Y(chart.vals[i]), 3, 0, 7);
-      g.fillStyle = '#fff'; g.fill(); g.strokeStyle = '#c8663f'; g.lineWidth = 2; g.stroke();
+      g.fillStyle = isCur ? '#f2ede6' : '#fff'; g.fill();
+      g.setLineDash(isCur ? [2, 2] : []);
+      g.strokeStyle = '#c8663f'; g.lineWidth = 2; g.stroke();
+      g.setLineDash([]);
     }
   });
 
@@ -596,9 +623,12 @@ function switchView(v) {
 function renderMeta() {
   const n = alive().length;
   const ds = alive().map(r => r.date).sort();
-  $('metaInfo').innerHTML = S.meta && S.meta.source
+  const hadLocal = !!localStorage.getItem(LS_DATA);
+  const cacheTip = hadLocal ? '本机有缓存，下次打开秒出' : '本机暂无缓存（首次打开或系统清过），每次要等云端拉取';
+  $('metaInfo').innerHTML = (S.meta && S.meta.source
     ? `${esc(S.meta.source)}<br>云端更新：${esc(S.meta.updatedAt || '—')}<br>本地记录：<b>${n}</b> 条${ds.length ? '，' + ds[0] + ' ~ ' + ds[ds.length - 1] : ''}`
-    : `本地内置数据 <b>${n}</b> 条${ds.length ? '，' + ds[0] + ' ~ ' + ds[ds.length - 1] : ''}。填入 Token 后可与云端同步。`;
+    : `本地内置数据 <b>${n}</b> 条${ds.length ? '，' + ds[0] + ' ~ ' + ds[ds.length - 1] : ''}。填入 Token 后可与云端同步。`)
+    + `<br><span class="dim">${cacheTip}${S.dirty ? ' · 有未同步改动' : ''}</span>`;
 }
 function renderAll() {
   if (!S.month) S.month = monthOf(todayStr());
