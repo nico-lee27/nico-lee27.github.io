@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>家庭账本</title>
+<meta name="description" content="家庭账本 · 多人记账 PWA">
+<meta name="theme-color" content="#f7f6f3">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="家庭账本">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app">
+  <header id="topbar">
+    <div class="tb-left">
+      <span id="tbTitle">账本</span>
+    </div>
+    <div class="tb-right">
+      <span id="syncDot" class="sync-dot" title="同步状态"></span>
+      <span id="syncText" class="sync-text">未配置</span>
+    </div>
+  </header>
+
+  <!-- ============ 账本 ============ -->
+  <section class="view" id="view-ledger">
+    <div class="filterbar">
+      <div class="month-nav">
+        <button class="mn-btn" id="mPrev" aria-label="上个月">‹</button>
+        <button class="mn-label" id="mLabel">2026-10</button>
+        <button class="mn-btn" id="mNext" aria-label="下个月">›</button>
+      </div>
+      <div class="month-sum">
+        <span class="ms-num" id="mTotal">¥0</span>
+        <span class="ms-sub" id="mCount">0 笔</span>
+      </div>
+    </div>
+
+    <div class="searchrow">
+      <input type="search" id="qInput" placeholder="搜说明 / 商家 / 类别" autocomplete="off">
+      <button class="clear-q hidden" id="qClear">×</button>
+    </div>
+    <div class="chips" id="catChips"></div>
+
+    <div id="ledgerList" class="ledger-list"></div>
+    <div id="ledgerEmpty" class="empty hidden">这个月还没有记账<br><span>点下方 ＋ 记一笔</span></div>
+  </section>
+
+  <!-- ============ 看板 ============ -->
+  <section class="view hidden" id="view-board">
+    <div class="seg" id="rangeSeg">
+      <button data-range="month" class="on">本月</button>
+      <button data-range="last">上月</button>
+      <button data-range="all">全部</button>
+    </div>
+    <div class="range-label" id="rangeLabel"></div>
+
+    <div class="kpi-grid">
+      <div class="kpi"><span class="kpi-v" id="kTotal">¥0</span><span class="kpi-k">总支出</span></div>
+      <div class="kpi"><span class="kpi-v" id="kCount">0</span><span class="kpi-k">笔数</span></div>
+      <div class="kpi"><span class="kpi-v" id="kAvg">¥0</span><span class="kpi-k">日均</span></div>
+      <div class="kpi"><span class="kpi-v" id="kMax">¥0</span><span class="kpi-k">最大单笔</span></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">环比
+        <span class="card-hint" id="momHint"></span>
+      </div>
+      <div class="mom" id="momBox"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">分类占比</div>
+      <div id="catBars" class="cat-bars"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">
+        月度趋势
+        <button class="mini-btn" id="zoomReset">重置缩放</button>
+      </div>
+      <div class="chart-hint">双指捏合缩放 · 单指左右拖动</div>
+      <div class="chart-wrap">
+        <canvas id="lineChart"></canvas>
+      </div>
+      <div class="chart-range" id="chartRange"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">Top 5 单笔</div>
+      <div id="topList" class="top-list"></div>
+    </div>
+    <div class="pad"></div>
+  </section>
+
+  <!-- ============ 设置 ============ -->
+  <section class="view hidden" id="view-settings">
+    <div class="card">
+      <div class="card-h">GitHub 同步</div>
+      <p class="note">账本数据存放在你的私有仓库 <code>data/records.json</code>。填入一次 Token 后，家人打开同一链接、填同一个 Token 即可共享同一本账。</p>
+      <label class="fld">Token (PAT)
+        <input type="password" id="cfgToken" placeholder="github_pat_xxx / ghp_xxx" autocomplete="off">
+      </label>
+      <label class="fld">仓库 owner
+        <input type="text" id="cfgOwner" placeholder="nico-lee27" autocomplete="off">
+      </label>
+      <label class="fld">仓库名
+        <input type="text" id="cfgRepo" placeholder="family-ledger" autocomplete="off">
+      </label>
+      <label class="fld">分支
+        <input type="text" id="cfgBranch" placeholder="main" autocomplete="off">
+      </label>
+      <div class="btn-row">
+        <button class="btn primary" id="btnSaveCfg">保存配置</button>
+        <button class="btn" id="btnPull">拉取云端</button>
+        <button class="btn" id="btnPush">推送云端</button>
+      </div>
+      <div class="sync-log" id="syncLog"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">导出</div>
+      <p class="note">导出为 .xlsx，字段与腾讯文档「记账本」一致：日期 / 年月 / 支出类别 / 金额 / 说明 / 商家·地点。</p>
+      <div class="btn-row">
+        <button class="btn primary" id="btnExportAll">导出全部</button>
+        <button class="btn" id="btnExportMonth">导出当月</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">数据来源</div>
+      <p class="note" id="metaInfo">—</p>
+      <div class="btn-row">
+        <button class="btn" id="btnReloadBundled">恢复内置数据</button>
+        <button class="btn danger" id="btnClearLocal">清空本地缓存</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">装到手机桌面</div>
+      <p class="note">iPhone Safari 打开本页 → 底部「分享」→「添加到主屏幕」。之后从桌面图标进入即为全屏 App，可离线查看。</p>
+    </div>
+    <div class="pad"></div>
+  </section>
+</div>
+
+<!-- ============ 底部 Tab ============ -->
+<nav id="tabbar">
+  <button class="tab on" data-view="ledger"><span class="ti">📒</span>账本</button>
+  <button class="tab-plus" id="btnAdd" aria-label="记一笔"><span>＋</span></button>
+  <button class="tab" data-view="board"><span class="ti">📊</span>看板</button>
+  <button class="tab" data-view="settings"><span class="ti">⚙️</span>设置</button>
+</nav>
+
+<!-- ============ 记账面板 ============ -->
+<div id="sheetMask" class="mask hidden"></div>
+<div id="sheet" class="sheet hidden">
+  <div class="sheet-h">
+    <button id="sheetCancel">取消</button>
+    <span>记一笔</span>
+    <button id="sheetSave" class="ok">保存</button>
+  </div>
+
+  <div class="amt-box">
+    <span class="cny">¥</span>
+    <input id="fAmount" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off">
+  </div>
+
+  <div class="quick-amts" id="quickAmts"></div>
+
+  <div class="fld-title">支出类别</div>
+  <div class="cat-grid" id="catGrid"></div>
+
+  <div class="fld-title">日期</div>
+  <div class="date-row">
+    <input id="fDate" type="date">
+    <div class="date-quick">
+      <button data-d="0" class="on">今天</button>
+      <button data-d="-1">昨天</button>
+      <button data-d="-2">前天</button>
+    </div>
+  </div>
+
+  <div class="fld-title">商家 / 地点 <span class="opt">选填</span></div>
+  <input id="fMerchant" type="text" placeholder="如：乐尔乐" autocomplete="off" class="txt">
+  <div class="chips wrap" id="merchantChips"></div>
+
+  <div class="fld-title">说明 <span class="opt">选填</span></div>
+  <input id="fNote" type="text" placeholder="如：买菜" autocomplete="off" class="txt">
+  <div class="chips wrap" id="noteChips"></div>
+  <div class="pad"></div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="app.js"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
