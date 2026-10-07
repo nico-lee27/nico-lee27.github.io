@@ -144,7 +144,10 @@ async function pull() {
   const remote = JSON.parse(b64dec(j.content));
   S.records = merge(S.records, (remote.records || []).map(r => ({ ...r, source: r.source || 'app' })));
   S.sha = j.sha; S.meta = { source: remote.source, updatedAt: remote.updatedAt };
-  saveLocal(); renderAll();
+  saveLocal();
+  const sy = window.scrollY;      // 自动同步时不打断当前浏览位置
+  renderAll();
+  window.scrollTo(0, sy);
   setSync('ok', '已同步 ' + new Date().toTimeString().slice(0, 5));
   return S.records.length;
 }
@@ -679,6 +682,29 @@ function bind() {
   initChartGesture();
   window.addEventListener('resize', () => { if (S.view === 'board') drawChart(); });
 
+  // 顶部同步状态：点一下立即同步
+  const tbRight = document.querySelector('.tb-right');
+  if (tbRight) tbRight.addEventListener('click', () => {
+    if (!S.cfg.token) { switchView('settings'); return; }
+    toast('同步中…'); maybeSync(0);
+  });
+
+  // 账本页下拉刷新（仅在页面顶部、非弹层内、垂直下滑时触发）
+  let pullY = null;
+  const sheetOpen = () => !$('sheet').classList.contains('hidden');
+  document.addEventListener('touchstart', e => {
+    if (S.view !== 'ledger' || window.scrollY > 0 || sheetOpen()) { pullY = null; return; }
+    pullY = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (pullY === null) return;
+    if (e.touches[0].clientY - pullY > 70) {
+      pullY = null;
+      if (S.cfg.token) { toast('同步中…'); maybeSync(0); }
+    }
+  }, { passive: true });
+  document.addEventListener('touchend', () => { pullY = null; }, { passive: true });
+
   // 记账面板
   $('catGrid').onclick = e => {
     const b = e.target.closest('.cg'); if (!b) return;
@@ -753,6 +779,30 @@ function applyUrlConfig() {
   } catch (e) { return false; }
 }
 
+/* ========== 自动同步 ==========
+   纯前端没有服务端推送，靠三条腿保证「别人记的账能尽快看到」：
+   1) 从后台切回前台 / 窗口获焦 → 立即拉
+   2) 停留在前台时 → 每 25 秒轮询一次（iOS 把 App 切到后台会冻结定时器，所以只在可见时跑）
+   3) 账本页顶部下拉 → 手动立即拉 */
+let lastSyncAt = 0;
+function maybeSync(minGap) {
+  const now = Date.now();
+  if (now - lastSyncAt < minGap) return;
+  if (!S.cfg.token || !S.cfg.owner || !S.cfg.repo) return;
+  lastSyncAt = now;
+  syncNow();
+}
+function startAutoSync() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') maybeSync(2000);
+  });
+  window.addEventListener('focus', () => maybeSync(2000));
+  window.addEventListener('online', () => maybeSync(0));
+  setInterval(() => {
+    if (document.visibilityState === 'visible') maybeSync(25000);
+  }, 10000);
+}
+
 /* ========== 启动 ========== */
 async function boot() {
   loadCfg();
@@ -783,4 +833,4 @@ async function boot() {
 
 bind();
 boot();
-window.addEventListener('online', () => { if (S.dirty) syncNow(); });
+startAutoSync();
