@@ -641,6 +641,7 @@ function resetZoom() { chart.i0 = 0; chart.i1 = Math.max(0, chart.n - 1); drawCh
 
 /* ========== 记账面板 ========== */
 let draft = { cat: '', date: todayStr() };
+let editingId = null;   // 非 null 表示正在编辑已有记录
 
 function renderCatGrid() {
   $('catGrid').innerHTML = CATS.map(c =>
@@ -669,42 +670,82 @@ function renderHistoryChips() {
     }
   }
 }
-function openSheet() {
-  draft = { cat: draft.cat || '食品餐饮', date: todayStr() };
-  $('fAmount').value = ''; $('fMerchant').value = ''; $('fNote').value = ''; $('fDate').value = draft.date;
+function openSheet(rec) {
+  editingId = rec ? rec.id : null;
+  if (rec) {
+    // 编辑已有记录：预填全部字段
+    draft = { cat: rec.category || '食品餐饮', date: rec.date || todayStr() };
+    $('fAmount').value = String(rec.amount);
+    $('fMerchant').value = rec.merchant || '';
+    $('fNote').value = rec.note || '';
+    $('fDate').value = draft.date;
+    $('sheetTitle').textContent = '编辑记录';
+    $('sheetTip').textContent = rec.source === 'docs'
+      ? `来自腾讯文档的原始记录（${rec.date}）· 删除请左滑该行`
+      : `记于 ${new Date(rec.updatedAt || Date.now()).toLocaleString('zh-CN', { hour12: false }).slice(0, 16)} · 删除请左滑该行`;
+  } else {
+    draft = { cat: draft.cat || '食品餐饮', date: todayStr() };
+    $('fAmount').value = ''; $('fMerchant').value = ''; $('fNote').value = ''; $('fDate').value = draft.date;
+    $('sheetTitle').textContent = '记一笔';
+    $('sheetTip').textContent = '';
+  }
+  syncDateQuickBtns();
   renderCatGrid(); renderQuickAmts(); renderHistoryChips();
   $('sheetMask').classList.remove('hidden'); $('sheet').classList.remove('hidden');
-  setTimeout(() => $('fAmount').focus(), 260);
+  setTimeout(() => { $('fAmount').focus(); $('fAmount').select(); }, 260);
 }
-function closeSheet() { $('sheetMask').classList.add('hidden'); $('sheet').classList.add('hidden'); }
+function closeSheet() {
+  $('sheetMask').classList.add('hidden'); $('sheet').classList.add('hidden');
+  editingId = null;
+}
+// 日期快捷按钮高亮跟随当前 fDate
+function syncDateQuickBtns() {
+  const v = $('fDate').value;
+  document.querySelectorAll('.date-quick button').forEach(b => {
+    const d = Number(b.dataset.d);
+    const t = new Date(); t.setDate(t.getDate() + d);
+    const s = `${t.getFullYear()}-${pad2(t.getMonth() + 1)}-${pad2(t.getDate())}`;
+    b.classList.toggle('on', s === v);
+  });
+}
 
 async function saveRecord() {
   const amount = parseFloat(($('fAmount').value || '').replace(/[^\d.]/g, ''));
   if (!amount || amount <= 0) { toast('请输入金额'); $('fAmount').focus(); return; }
   if (!draft.cat) { toast('请选择类别'); return; }
-  const rec = {
-    id: uid(),
+  const payload = {
     date: $('fDate').value || todayStr(),
     category: draft.cat,
     amount: Math.round(amount * 100) / 100,
     note: $('fNote').value.trim(),
     merchant: $('fMerchant').value.trim(),
-    source: 'app',
+    _del: false,
     updatedAt: new Date().toISOString(),
   };
-  S.records.push(rec);
+
+  if (editingId) {
+    const rec = S.records.find(x => x.id === editingId);
+    if (!rec) { toast('记录已不存在'); closeSheet(); return; }
+    Object.assign(rec, payload);          // 保留 id / source，只更新可编辑字段
+    if (!S.allMonth) S.month = monthOf(rec.date);   // 改了日期就跳到那个月，避免"改完看不见"
+    closeSheet(); renderAll();
+    toast('已保存修改');
+  } else {
+    S.records.push({ id: uid(), ...payload, source: 'app' });
+    if (!S.allMonth) S.month = monthOf(payload.date);
+    closeSheet(); renderAll();
+    toast('已记 ' + money(payload.amount));
+  }
+
   saveLocal(); S.dirty = true;
-  if (!S.allMonth) S.month = monthOf(rec.date);
-  closeSheet(); renderAll();
-  toast('已记 ' + money(rec.amount));
   setSync('pending', '待同步');
   push().then(() => toast('已同步到云端')).catch(e => { setSync('err', '同步失败'); log('× ' + e.message); });
 }
 
-async function removeRecord(id) {
+async function removeRecord(id, skipConfirm) {
   const r = S.records.find(x => x.id === id);
   if (!r) return;
-  if (!confirm(`删除这笔 ${money(r.amount)} 的记录？`)) return;
+  if (!skipConfirm && !confirm(`删除这笔 ${money(r.amount)} 的记录？`)) return;
   r._del = true; r.updatedAt = new Date().toISOString();
   saveLocal(); S.dirty = true; renderAll();
   toast('已删除');
@@ -778,7 +819,7 @@ function renderAll() {
 function bind() {
   // Tab
   document.querySelectorAll('.tab').forEach(t => t.onclick = () => switchView(t.dataset.view));
-  $('btnAdd').onclick = openSheet;
+  $('btnAdd').onclick = () => openSheet();
   $('sheetCancel').onclick = closeSheet;
   $('sheetMask').onclick = closeSheet;
   $('sheetSave').onclick = saveRecord;
@@ -828,12 +869,20 @@ function bind() {
     const del = e.target.closest('.row-del');
     if (del) { removeRecord(del.closest('.row').dataset.id); return; }
     const inner = e.target.closest('.row-inner');
-    if (inner && inner.classList.contains('swiped')) { inner.classList.remove('swiped'); inner.style.transform = ''; return; }
+    if (inner && inner.classList.contains('swiped')) { inner.classList.remove('swiped'); inner.style.transform = ''; moved = false; return; }
+    if (moved) { moved = false; return; }     // 刚滑动过，不算点击
     const head = e.target.closest('.daygrp-h');
     if (head && head.dataset.month) {
       const m = head.dataset.month;
       S.expanded[m] = !(S.expanded[m] !== false && (S.expanded[m] === true || m === S.month || monthOf(todayStr()) === m));
       renderLedger();
+      return;
+    }
+    // 点任意一笔 → 打开编辑
+    const row = e.target.closest('.row');
+    if (row) {
+      const rec = S.records.find(x => x.id === row.dataset.id);
+      if (rec) openSheet(rec);
     }
   });
 
@@ -884,7 +933,7 @@ function bind() {
     const b = e.target.closest('[data-fill]'); if (!b) return;
     $(b.dataset.fill).value = b.dataset.v;
   });
-  $('fDate').onchange = e => { draft.date = e.target.value; };
+  $('fDate').onchange = e => { draft.date = e.target.value; syncDateQuickBtns(); };
   document.querySelectorAll('.date-quick button').forEach(b => b.onclick = () => {
     const d = new Date(); d.setDate(d.getDate() + parseInt(b.dataset.d, 10));
     const v = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;

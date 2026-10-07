@@ -273,3 +273,8 @@ code{background:#f0efea;padding:1px 5px;border-radius:5px;font-size:13px}
   animation:fade .2s;
 }
 .dim{color:var(--t3)}
+
+.sheet-tip{
+  margin:10px 16px 0;font-size:12px;color:var(--t3);line-height:1.6;text-align:center;
+}
+.sheet-tip:empty{display:none}
