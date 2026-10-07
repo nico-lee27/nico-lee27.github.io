@@ -129,10 +129,21 @@ async function loadLocalFallback() {          // localStorage 被清时的兜底
   return false;
 }
 function saveCfg() {
-  localStorage.setItem(LS_CFG, JSON.stringify(S.cfg));
+  try { localStorage.setItem(LS_CFG, JSON.stringify(S.cfg)); } catch (e) { }
+  IDB.set('cfg', S.cfg);          // 双写，防止 iOS 清掉 localStorage 后要重新配
 }
 function loadCfg() {
   try { Object.assign(S.cfg, JSON.parse(localStorage.getItem(LS_CFG) || '{}')); } catch (e) { }
+}
+async function loadCfgFallback() {
+  if (S.cfg.token) return false;
+  const o = await IDB.get('cfg');
+  if (o && o.token) {
+    Object.assign(S.cfg, o);
+    try { localStorage.setItem(LS_CFG, JSON.stringify(o)); } catch (e) { }
+    return true;
+  }
+  return false;
 }
 
 /* 有效记录（排除墓碑） */
@@ -977,7 +988,9 @@ function bind() {
 }
 
 /* 从分享链接自动导入配置：#t=<token>[&owner=&repo=&branch=]
-   保留 hash 不清空 —— 添加到主屏幕后每次启动都能自愈配置 */
+   导入后立刻把 token 从地址栏抹掉 —— 否则它会留在 Safari 历史、iCloud 同步的标签、
+   以及「添加到主屏幕」保存的图标地址里。配置本身已双写 localStorage + IndexedDB，
+   抹掉 URL 不影响后续使用。 */
 function applyUrlConfig() {
   try {
     const q = new URLSearchParams(location.search);
@@ -990,8 +1003,24 @@ function applyUrlConfig() {
     if (get('repo')) S.cfg.repo = get('repo').trim();
     if (get('branch')) S.cfg.branch = get('branch').trim();
     saveCfg();
+    stripTokenFromUrl();
     return true;
   } catch (e) { return false; }
+}
+function stripTokenFromUrl() {
+  try {
+    const u = new URL(location.href);
+    let changed = false;
+    ['t', 'token'].forEach(k => { if (u.searchParams.has(k)) { u.searchParams.delete(k); changed = true; } });
+    if (u.hash) {
+      const h = new URLSearchParams(u.hash.replace(/^#/, ''));
+      ['t', 'token'].forEach(k => { if (h.has(k)) { h.delete(k); changed = true; } });
+      const hs = h.toString();
+      u.hash = hs ? hs : '';
+      if (!hs) changed = true;
+    }
+    if (changed) history.replaceState(null, '', u.pathname + u.search + u.hash);
+  } catch (e) { }
 }
 
 /* ========== 自动同步 ==========
@@ -1022,6 +1051,7 @@ function startAutoSync() {
 async function boot() {
   loadCfg();
   const autoCfg = applyUrlConfig();
+  if (!autoCfg) await loadCfgFallback();   // localStorage 被清时从 IndexedDB 找回配置
   ['cfgToken', 'cfgOwner', 'cfgRepo', 'cfgBranch'].forEach(id => { $(id).value = S.cfg[id.slice(3).toLowerCase()] || ''; });
   $('cfgBranch').value = S.cfg.branch || 'main';
 
