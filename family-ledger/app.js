@@ -818,7 +818,10 @@ async function boot() {
       S.records = (j.records || []).map(r => ({ ...r, source: r.source || 'docs' }));
       S.meta = { source: j.source, updatedAt: j.updatedAt };
       saveLocal();
-    } catch (e) { /* 云端版无内置数据属正常，靠同步拉取 */ }
+    } catch (e) {
+      /* 云端版无内置数据属正常，靠同步拉取；隐藏「恢复内置数据」避免误点清空 */
+      const b = $('btnReloadBundled'); if (b) b.style.display = 'none';
+    }
   }
   renderAll();
   if (S.cfg.token && S.cfg.owner && S.cfg.repo) {
